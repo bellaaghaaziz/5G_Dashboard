@@ -13,15 +13,8 @@ pipeline {
       }
     }
 
-    stage('Build Docker Image') {
-      steps {
-        echo 'Building Docker image on host daemon...'
-        sh """
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${WORK}:/workspace docker:24.0.5-cli \
-            sh -c "cd /workspace && docker build -t ${IMAGE} ."
-        """
-      }
-    }
+    stage('Build Docker Image') { steps { echo 'Building Docker image on host daemon...' // debug: list files inside the mounted workspace from the docker CLI container sh ''' docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${WORK}:/workspace docker:24.0.5-cli
+sh -c "ls -la /workspace && echo ---- build ---- && docker build -t ${IMAGE} -f /workspace/Dockerfile /workspace" ''' } }
 
     stage('AI Validation & Testing') {
       steps {
