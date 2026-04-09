@@ -7,39 +7,23 @@ pipeline {
 
   stages {
 
-    // ------------------------------------------------------------------ //
-    // 1. PREPARE — confirm the workspace actually has your files
-    // ------------------------------------------------------------------ //
     stage('Prepare') {
       steps {
         echo "Workspace: ${env.WORKSPACE}"
-        sh 'ls -la'          // will print every file Jenkins checked out
+        sh 'ls -la'
       }
     }
 
-    // ------------------------------------------------------------------ //
-    // 2. BUILD — call docker directly, no docker-in-docker wrapper
-    //    The old approach mounted ${WORKSPACE} from inside the Jenkins
-    //    container, which maps to an EMPTY path on the host → empty build
-    //    context → "no such file: Dockerfile".
-    //    Fix: call docker build straight from the Jenkins agent where the
-    //    workspace already exists as a real directory.
-    // ------------------------------------------------------------------ //
     stage('Build Docker Image') {
       steps {
         sh 'docker build -t ${IMAGE} .'
       }
     }
 
-    // ------------------------------------------------------------------ //
-    // 3. TEST — run the container and execute your test script
-    //    If you don't have test_models.py yet the stage is skipped safely.
-    // ------------------------------------------------------------------ //
     stage('AI Validation & Testing') {
       steps {
         script {
-          def hasTests = fileExists('test_models.py')
-          if (hasTests) {
+          if (fileExists('test_models.py')) {
             sh 'docker run --rm -v ${WORKSPACE}:/workspace -w /workspace ${IMAGE} python test_models.py'
           } else {
             echo 'No test_models.py found — skipping tests.'
@@ -48,15 +32,9 @@ pipeline {
       }
     }
 
-    // ------------------------------------------------------------------ //
-    // 4. PUSH — disabled by default, uncomment + add Jenkins credentials
-    //    to enable.  In Jenkins UI: Manage Jenkins → Credentials → add a
-    //    "Username with password" credential with id = "dockerhub-creds"
-    // ------------------------------------------------------------------ //
     stage('Push to Docker Registry') {
       steps {
-        echo 'Push is disabled. To enable: uncomment the block below and'
-        echo 'add a Jenkins credential with id = dockerhub-creds.'
+        echo 'Push is disabled. Add dockerhub-creds in Jenkins to enable.'
         /*
         withCredentials([usernamePassword(
             credentialsId: 'dockerhub-creds',
@@ -72,20 +50,18 @@ pipeline {
       }
     }
 
-    // ------------------------------------------------------------------ //
-    // 5. DEPLOY — applies deployment.yaml if it exists.
-    //    Requires kubectl installed on the Jenkins agent AND a valid
-    //    kubeconfig at ~/.kube/config (or KUBECONFIG env var set).
-    // ------------------------------------------------------------------ //
     stage('Deploy to Kubernetes') {
       steps {
         script {
-          def hasManifest = fileExists('deployment.yaml')
-          if (hasManifest) {
+          // Check kubectl exists before trying
+          def kubectlAvailable = sh(script: 'which kubectl', returnStatus: true) == 0
+          if (!kubectlAvailable) {
+            echo 'kubectl not found on this agent — skipping deploy. Install it or configure a kubectl Jenkins plugin.'
+          } else if (fileExists('deployment.yaml')) {
             sh 'kubectl apply -f deployment.yaml'
             sh 'kubectl rollout status deployment/handover-ai-deployment --timeout=120s'
           } else {
-            echo 'No deployment.yaml found — skipping Kubernetes deploy.'
+            echo 'No deployment.yaml found — skipping deploy.'
           }
         }
       }
