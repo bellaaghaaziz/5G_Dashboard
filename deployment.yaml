@@ -2,10 +2,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: handover-ai-deployment
-  labels:
-    app: smart-5g-ai
 spec:
-  replicas: 3  # Keep 3 AI brains running at all times for high availability!
+  replicas: 3
   selector:
     matchLabels:
       app: smart-5g-ai
@@ -16,13 +14,10 @@ spec:
     spec:
       containers:
       - name: 5g-ai-container
-        image: mycompany/5g-handover-ai:latest
+        image: 5g-handover-ai:latest
+        imagePullPolicy: IfNotPresent  # <--- Forces K8s to use your local Jenkins build!
         ports:
         - containerPort: 8501
-        resources:
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
 ---
 apiVersion: v1
 kind: Service
@@ -31,7 +26,8 @@ metadata:
 spec:
   type: LoadBalancer
   ports:
-  - port: 80
+  - port: 8501
     targetPort: 8501
+    nodePort: 30001
   selector:
     app: smart-5g-ai
