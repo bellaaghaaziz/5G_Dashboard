@@ -1,0 +1,20 @@
+# Git
+.git
+.gitignore
+
+# CI
+Jenkinsfile
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Env files (never bake secrets into image)
+.env
+*.env
+
+# Local venv
+venv/
+.venv/

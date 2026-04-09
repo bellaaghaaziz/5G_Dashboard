@@ -3,65 +3,98 @@ pipeline {
 
   environment {
     IMAGE = "5g-handover-ai:latest"
-    WORK  = "${env.WORKSPACE}"
   }
 
   stages {
+
+    // ------------------------------------------------------------------ //
+    // 1. PREPARE — confirm the workspace actually has your files
+    // ------------------------------------------------------------------ //
     stage('Prepare') {
       steps {
-        echo 'Workspace already checked out by Jenkins. Using local code/models.'
+        echo "Workspace: ${env.WORKSPACE}"
+        sh 'ls -la'          // will print every file Jenkins checked out
       }
     }
 
+    // ------------------------------------------------------------------ //
+    // 2. BUILD — call docker directly, no docker-in-docker wrapper
+    //    The old approach mounted ${WORKSPACE} from inside the Jenkins
+    //    container, which maps to an EMPTY path on the host → empty build
+    //    context → "no such file: Dockerfile".
+    //    Fix: call docker build straight from the Jenkins agent where the
+    //    workspace already exists as a real directory.
+    // ------------------------------------------------------------------ //
     stage('Build Docker Image') {
       steps {
-        echo 'Building Docker image on host daemon...'
-        // list workspace inside the docker-cli container and build using explicit Dockerfile path + context
-        sh """
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${WORK}:/workspace docker:24.0.5-cli \
-            sh -c "ls -la /workspace || true && echo ---- build ---- && docker build -t ${IMAGE} -f /workspace/Dockerfile /workspace"
-        """
+        sh 'docker build -t ${IMAGE} .'
       }
     }
 
+    // ------------------------------------------------------------------ //
+    // 3. TEST — run the container and execute your test script
+    //    If you don't have test_models.py yet the stage is skipped safely.
+    // ------------------------------------------------------------------ //
     stage('AI Validation & Testing') {
       steps {
-        echo 'Running tests inside the built Docker image...'
-        // run tests inside the image (image must include python + test deps)
-        sh """
-          docker run --rm -v ${WORK}:/workspace -w /workspace ${IMAGE} \
-            sh -c "python test_models.py"
-        """
+        script {
+          def hasTests = fileExists('test_models.py')
+          if (hasTests) {
+            sh 'docker run --rm -v ${WORKSPACE}:/workspace -w /workspace ${IMAGE} python test_models.py'
+          } else {
+            echo 'No test_models.py found — skipping tests.'
+          }
+        }
       }
     }
 
-    stage('Push to Docker Registry (optional)') {
+    // ------------------------------------------------------------------ //
+    // 4. PUSH — disabled by default, uncomment + add Jenkins credentials
+    //    to enable.  In Jenkins UI: Manage Jenkins → Credentials → add a
+    //    "Username with password" credential with id = "dockerhub-creds"
+    // ------------------------------------------------------------------ //
+    stage('Push to Docker Registry') {
       steps {
-        echo 'Push disabled by default. Configure credentials and uncomment push steps if needed.'
-        // Example push (uncomment & configure credentials if you want)
-        // sh "docker tag ${IMAGE} mycompany/5g-handover-ai:latest"
-        // sh "docker login -u $DOCKER_USER -p $DOCKER_PASS"
-        // sh "docker push mycompany/5g-handover-ai:latest"
+        echo 'Push is disabled. To enable: uncomment the block below and'
+        echo 'add a Jenkins credential with id = dockerhub-creds.'
+        /*
+        withCredentials([usernamePassword(
+            credentialsId: 'dockerhub-creds',
+            usernameVariable: 'DOCKER_USER',
+            passwordVariable: 'DOCKER_PASS')]) {
+          sh """
+            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+            docker tag ${IMAGE} ${DOCKER_USER}/5g-handover-ai:latest
+            docker push ${DOCKER_USER}/5g-handover-ai:latest
+          """
+        }
+        */
       }
     }
 
+    // ------------------------------------------------------------------ //
+    // 5. DEPLOY — applies deployment.yaml if it exists.
+    //    Requires kubectl installed on the Jenkins agent AND a valid
+    //    kubeconfig at ~/.kube/config (or KUBECONFIG env var set).
+    // ------------------------------------------------------------------ //
     stage('Deploy to Kubernetes') {
       steps {
-        echo 'Applying K8s manifests using a temporary kubectl container.'
-        sh """
-          docker run --rm -v /root/.kube/config:/root/.kube/config -v ${WORK}:/workspace bitnami/kubectl:latest \
-            apply -f /workspace/deployment.yaml
-        """
-        sh """
-          docker run --rm -v /root/.kube/config:/root/.kube/config bitnami/kubectl:latest \
-            rollout status deployment/handover-ai-deployment --timeout=120s
-        """
+        script {
+          def hasManifest = fileExists('deployment.yaml')
+          if (hasManifest) {
+            sh 'kubectl apply -f deployment.yaml'
+            sh 'kubectl rollout status deployment/handover-ai-deployment --timeout=120s'
+          } else {
+            echo 'No deployment.yaml found — skipping Kubernetes deploy.'
+          }
+        }
       }
     }
+
   }
 
   post {
-    success { echo "Pipeline finished successfully." }
-    failure { echo "Pipeline failed — check console output." }
+    success { echo 'Pipeline finished successfully.' }
+    failure  { echo 'Pipeline failed — check console output above.' }
   }
 }
