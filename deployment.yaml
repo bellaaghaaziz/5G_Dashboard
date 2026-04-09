@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: handover-ai-deployment
+  labels:
+    app: smart-5g-ai
+spec:
+  replicas: 3  # Keep 3 AI brains running at all times for high availability!
+  selector:
+    matchLabels:
+      app: smart-5g-ai
+  template:
+    metadata:
+      labels:
+        app: smart-5g-ai
+    spec:
+      containers:
+      - name: 5g-ai-container
+        image: mycompany/5g-handover-ai:latest
+        ports:
+        - containerPort: 8501
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: handover-ai-service
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8501
+  selector:
+    app: smart-5g-ai
