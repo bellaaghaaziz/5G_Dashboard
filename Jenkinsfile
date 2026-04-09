@@ -13,13 +13,21 @@ pipeline {
       }
     }
 
-    stage('Build Docker Image') { steps { echo 'Building Docker image on host daemon...' // debug: list files inside the mounted workspace from the docker CLI container sh ''' docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${WORK}:/workspace docker:24.0.5-cli
-sh -c "ls -la /workspace && echo ---- build ---- && docker build -t ${IMAGE} -f /workspace/Dockerfile /workspace" ''' } }
+    stage('Build Docker Image') {
+      steps {
+        echo 'Building Docker image on host daemon...'
+        // list workspace inside the docker-cli container and build using explicit Dockerfile path + context
+        sh """
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${WORK}:/workspace docker:24.0.5-cli \
+            sh -c "ls -la /workspace || true && echo ---- build ---- && docker build -t ${IMAGE} -f /workspace/Dockerfile /workspace"
+        """
+      }
+    }
 
     stage('AI Validation & Testing') {
       steps {
         echo 'Running tests inside the built Docker image...'
-        // Run the tests inside the image that contains all dependencies
+        // run tests inside the image (image must include python + test deps)
         sh """
           docker run --rm -v ${WORK}:/workspace -w /workspace ${IMAGE} \
             sh -c "python test_models.py"
@@ -30,8 +38,9 @@ sh -c "ls -la /workspace && echo ---- build ---- && docker build -t ${IMAGE} -f 
     stage('Push to Docker Registry (optional)') {
       steps {
         echo 'Push disabled by default. Configure credentials and uncomment push steps if needed.'
-        // Example:
+        // Example push (uncomment & configure credentials if you want)
         // sh "docker tag ${IMAGE} mycompany/5g-handover-ai:latest"
+        // sh "docker login -u $DOCKER_USER -p $DOCKER_PASS"
         // sh "docker push mycompany/5g-handover-ai:latest"
       }
     }
