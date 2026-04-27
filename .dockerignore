@@ -1,20 +1,44 @@
-# Git
-.git
-.gitignore
+# ── Large files ──────────────────────────────────────────────────────────────
+DATASET/
+*.parquet
+monitoring_state_v9.pkl
+mlruns/
+mlflow.db
 
-# CI
-Jenkinsfile
-
-# Python cache
+# ── Notebook + dev files ─────────────────────────────────────────────────────
+*.ipynb
+*.ipynb_checkpoints/
 __pycache__/
 *.pyc
-*.pyo
-.pytest_cache/
+.git/
+.gitignore
 
-# Env files (never bake secrets into image)
-.env
-*.env
+# ── Old/stale model files ────────────────────────────────────────────────────
+model_dso1_drop.pkl
+model_dso2_gain.pkl
+model_dso2_xgb_honest.pkl
+model_dso3_cluster.pkl
+model_dso4_master.pkl
+models/
 
-# Local venv
-venv/
-.venv/
+# ── Temp files ───────────────────────────────────────────────────────────────
+logs/
+*.log
+5.txt
+eval_outputs.txt
+fix_*.py
+patch_*.py
+run_*.py
+analyze_*.py
+check_*.py
+execute_*.py
+upgrade_*.py
+final_*.py
+add_*.py
+remove_*.py
+results_*.py
+
+# ── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp

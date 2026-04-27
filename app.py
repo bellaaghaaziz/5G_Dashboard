@@ -1,484 +1,353 @@
+"""
+5G Master Handover AI — Streamlit Dashboard
+Uses the models produced by 5G_Handover_Pipeline_Clean.ipynb
+
+Inference pipeline (in order):
+  1. scaler_dso1  → model_dso1_xgb      → dso1_risk_score
+  2. (no scaler)  → model_dso2_xgb_honest → dso2_neighbor_gain
+  3. scaler_dso3  → model_dso3_kmeans    → dso3_cluster
+  4. (no scaler)  → model_dso4_controller → handover decision
+"""
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
 import hmac
+import json
+import datetime
 
-# MUST be the very first Streamlit command — before anything else
-st.set_page_config(page_title="5G Master Handover AI", layout="wide")
+# ─── MUST be the very first Streamlit command ────────────────────────────────
+st.set_page_config(
+    page_title="5G Handover AI",
+    page_icon="📡",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AUTHENTICATION
 # ─────────────────────────────────────────────────────────────────────────────
-def check_password():
+def check_password() -> bool:
     if st.session_state.get("authenticated"):
         return True
 
-    st.title("🔐 5G Handover AI — Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if username in st.secrets["credentials"]:
-            stored_password = st.secrets["credentials"][username]
-            if hmac.compare_digest(password, stored_password):
-                st.session_state["authenticated"] = True
-                st.session_state["username"] = username
-                st.rerun()
+    st.markdown(
+        "<h1 style='text-align:center; margin-top:10vh'>📡 5G Handover AI</h1>"
+        "<p style='text-align:center; color:gray'>Enter your credentials to continue</p>",
+        unsafe_allow_html=True,
+    )
+    col_l, col_m, col_r = st.columns([1, 1, 1])
+    with col_m:
+        username = st.text_input("Username", key="login_user")
+        password = st.text_input("Password", type="password", key="login_pass")
+        if st.button("Login", use_container_width=True, type="primary"):
+            creds = st.secrets.get("credentials", {})
+            if username in creds:
+                if hmac.compare_digest(str(password), str(creds[username])):
+                    st.session_state["authenticated"] = True
+                    st.session_state["username"] = username
+                    st.rerun()
+                else:
+                    st.error("❌ Wrong password")
             else:
-                st.error("❌ Wrong password")
-        else:
-            st.error("❌ User not found")
-
+                st.error("❌ User not found")
     return False
 
-# GATE — everything below is invisible until logged in
+
 if not check_password():
     st.stop()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# APP STARTS HERE
-# ─────────────────────────────────────────────────────────────────────────────
-st.title("📡 Smart 5G Master Handover Controller")
 
-# --- LOAD THE MODELS ---
-@st.cache_resource
+# ─────────────────────────────────────────────────────────────────────────────
+# LOAD MODELS + FEATURE LISTS  (cached — loaded once per server process)
+# ─────────────────────────────────────────────────────────────────────────────
+@st.cache_resource(show_spinner="Loading AI models…")
 def load_models():
-    s_dso1 = joblib.load('scaler_dso1.pkl')
-    s_dso3 = joblib.load('scaler_dso3.pkl')
-    m_dso1 = joblib.load('model_dso1_drop.pkl')
-    m_dso2 = joblib.load('model_dso2_gain.pkl')
-    m_dso3 = joblib.load('model_dso3_cluster.pkl')
-    m_dso4 = joblib.load('model_dso4_master.pkl')
-    return s_dso1, s_dso3, m_dso1, m_dso2, m_dso3, m_dso4
+    """Load all scalers, models, and feature lists from disk."""
+    # Scalers
+    scaler_dso1 = joblib.load("scaler_dso1.pkl")
+    scaler_dso3 = joblib.load("scaler_dso3.pkl")
 
-scaler_dso1, scaler_dso3, model_dso1, model_dso2, model_dso3, model_dso4 = load_models()
+    # Models  — use the NEW filenames from the cleaned notebook
+    model_dso1 = joblib.load("model_dso1_xgb.pkl")
+    model_dso2 = joblib.load("model_dso2_xgb_honest.pkl")
+    model_dso3 = joblib.load("model_dso3_kmeans.pkl")
+    model_dso4 = joblib.load("model_dso4_controller.pkl")
 
-def get_features(model_or_scaler):
-    if hasattr(model_or_scaler, 'feature_names_in_'):
-        return list(model_or_scaler.feature_names_in_)
-    elif hasattr(model_or_scaler, 'get_booster'):
-        return list(model_or_scaler.get_booster().feature_names)
-    return []
+    # Feature lists  — keys: dso1_features / dso2_features / dso3_features / dso4_features
+    with open("model_feature_lists.json") as f:
+        feature_lists = json.load(f)
 
-all_features = list(set(get_features(scaler_dso1) + get_features(model_dso2) + get_features(scaler_dso3)))
-all_features.sort()
+    return scaler_dso1, scaler_dso3, model_dso1, model_dso2, model_dso3, model_dso4, feature_lists
 
-# --- SIDEBAR: logout + inputs ---
+
+scaler_dso1, scaler_dso3, model_dso1, model_dso2, model_dso3, model_dso4, feature_lists = load_models()
+
+# Correct key names produced by the new notebook
+DSO1_FEATS = feature_lists["dso1_features"]   # excludes dso3_cluster at training time
+DSO2_FEATS = feature_lists["dso2_features"]
+DSO3_FEATS = feature_lists["dso3_features"]
+DSO4_FEATS = feature_lists["dso4_features"]   # full_dso4_features (is_ho already excluded)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEFAULTS — physics-based starting values for every possible feature
+# ─────────────────────────────────────────────────────────────────────────────
+FEATURE_DEFAULTS: dict[str, float] = {
+    # Core radio
+    "rsrp":                    -95.0,
+    "rsrq":                    -12.0,
+    "sinr":                     10.0,
+    "cqi":                       9.0,
+    "tx_power":                 15.0,
+    "ta":                        5.0,
+    # Mobility
+    "velocity":                  5.0,
+    # Neighbour
+    "num_neighbors":             2.0,
+    "mean_neighbor_rsrp":      -90.0,
+    "best_neighbor_rsrp":      -88.0,
+    "neighbor_gap":              7.0,
+    # Temporal
+    "hour_of_day":    float(datetime.datetime.utcnow().hour),
+    "day_of_week":    float(datetime.datetime.utcnow().weekday()),
+    # Cell load
+    "cell_hist_datarate_mean":  25.0,
+    "cell_load_drop_flag":       0.0,
+    # Engineered lags
+    "rsrp_delta_3":              0.0,
+    "sinr_delta_3":              0.0,
+    "is_ho":                     0.0,
+    "latency_is_imputed":        0.0,
+    # DSO chain (placeholders — overwritten by pipeline)
+    "dso3_cluster":              0.0,
+    "dso1_risk_score":           0.0,
+    "dso2_neighbor_gain":        0.0,
+    # DSO3 extras (GPS, datarate — set to 0 when not available)
+    "datarate":                  0.0,
+    "latitude":                  0.0,
+    "longitude":                 0.0,
+}
+
+
+def make_row(overrides: dict[str, float]) -> dict[str, float]:
+    """Return a single feature row with defaults filled for every known feature."""
+    row = {**FEATURE_DEFAULTS}
+    row.update(overrides)
+    return row
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INFERENCE PIPELINE
+# ─────────────────────────────────────────────────────────────────────────────
+def run_pipeline(user_inputs: dict[str, float]) -> tuple[float, float, int, int]:
+    """
+    Execute the four-stage stacked inference pipeline.
+
+    Returns
+    -------
+    risk_score      : float  — DSO1 degradation probability [0, 1]
+    predicted_gain  : float  — DSO2 neighbour gain estimate (dBm)
+    cluster         : int    — DSO3 network state cluster [0, 3]
+    decision        : int    — DSO4 handover decision (0=stay, 1=handover)
+    """
+    row = make_row(user_inputs)
+
+    # ── Stage 1: DSO1 — degradation risk ────────────────────────────────────
+    # dso3_cluster is a placeholder (-1) at this point — consistent with training
+    df1 = pd.DataFrame([{f: row.get(f, 0.0) for f in DSO1_FEATS}])
+    X1  = scaler_dso1.transform(df1)
+    risk_score = float(model_dso1.predict_proba(X1)[0][1])
+
+    # ── Stage 2: DSO2 — neighbour gain ──────────────────────────────────────
+    df2 = pd.DataFrame([{f: row.get(f, 0.0) for f in DSO2_FEATS}])
+    predicted_gain = float(model_dso2.predict(df2)[0])
+
+    # ── Stage 3: DSO3 — network state cluster ───────────────────────────────
+    df3 = pd.DataFrame([{f: row.get(f, 0.0) for f in DSO3_FEATS}])
+    X3  = scaler_dso3.transform(df3)
+    cluster = int(model_dso3.predict(X3)[0])
+
+    # ── Stage 4: DSO4 — handover controller (consumes DSO1/2/3 outputs) ────
+    row["dso1_risk_score"]   = risk_score
+    row["dso2_neighbor_gain"] = predicted_gain
+    row["dso3_cluster"]       = float(cluster)
+    df4 = pd.DataFrame([{f: row.get(f, 0.0) for f in DSO4_FEATS}])
+    decision = int(model_dso4.predict(df4)[0])
+
+    return risk_score, predicted_gain, cluster, decision
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLUSTER LABEL LOOKUP
+# ─────────────────────────────────────────────────────────────────────────────
+CLUSTER_LABELS = {
+    0: ("🏢 Indoor / Static",   "Low velocity, stable signal"),
+    1: ("🚆 H-Bahn (Rail)",     "High velocity, frequent handovers"),
+    2: ("🚶 Pedestrian",        "Low speed, variable urban signal"),
+    3: ("📶 Cell Edge",         "Weak signal, handover candidate"),
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR — logout + input form
+# ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.write(f"Logged in as: **{st.session_state.get('username', '')}**")
-    if st.button("Logout"):
+    st.markdown(f"**👤 {st.session_state.get('username', '')}**")
+    if st.button("Logout", use_container_width=True):
         st.session_state["authenticated"] = False
         st.rerun()
 
-# --- TABS ---
-tab_main, tab_shap, tab_bias, tab_drift, tab_security = st.tabs([
-    "🚀 Prediction",
-    "🔍 Explainability (SHAP)",
-    "⚖️ Bias & Fairness",
-    "📉 Concept Drift",
-    "🔒 Security & Anomaly"
-])
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR — prediction form
-# ─────────────────────────────────────────────────────────────────────────────
-user_inputs = {}
-with st.sidebar.form("prediction_form"):
-    st.header("📱 Core Telemetry")
-
-    core_cols = ['rsrp', 'sinr', 'velocity', 'mean_latency', 'num_neighbors', 'mean_neighbor_rsrp']
-
-    if 'rsrp'               in all_features: user_inputs['rsrp']               = st.slider("Signal Strength (RSRP dBm)", -140.0, -40.0, -95.0)
-    if 'sinr'               in all_features: user_inputs['sinr']               = st.slider("Signal Quality (SINR)", -10.0, 30.0, 10.0)
-    if 'velocity'           in all_features: user_inputs['velocity']           = st.slider("Speed (m/s)", 0.0, 40.0, 5.0)
-    if 'mean_latency'       in all_features: user_inputs['mean_latency']       = st.slider("Ping (Latency ms)", 10.0, 300.0, 40.0)
-    if 'num_neighbors'      in all_features: user_inputs['num_neighbors']      = st.number_input("Number of Neighbor Towers", 0, 5, 2)
-    if 'mean_neighbor_rsrp' in all_features: user_inputs['mean_neighbor_rsrp'] = st.slider("Neighbor Avg Signal (dBm)", -140.0, -40.0, -90.0)
-
     st.markdown("---")
-    with st.expander("⚙️ Advanced Network Metrics"):
-        st.caption("Background metrics required by the AI. Defaults are fine.")
-        for feat in all_features:
-            if feat not in core_cols:
-                user_inputs[feat] = st.number_input(f"{feat}", value=0.0)
+    st.header("📱 Telemetry Input")
 
-    submit_button = st.form_submit_button(label="🚀 Run AI Prediction")
+    with st.form("prediction_form"):
+        st.subheader("Core Signal")
+        rsrp  = st.slider("RSRP — Signal Strength (dBm)", -140.0, -40.0, -95.0, step=1.0)
+        rsrq  = st.slider("RSRQ — Signal Quality (dB)",   -20.0,   0.0, -12.0, step=0.5)
+        sinr  = st.slider("SINR — Interference Ratio",    -10.0,  30.0,  10.0, step=0.5)
+        cqi   = st.slider("CQI  — Channel Quality",         0,     15,     9)
+        tx_pwr = st.slider("TX Power — Phone Transmit (dBm)", 0.0, 23.0, 15.0, step=0.5)
+        ta    = st.slider("TA — Timing Advance (distance proxy)", 0, 63, 5)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HELPER — run the full DSO pipeline
-# ─────────────────────────────────────────────────────────────────────────────
-def run_pipeline(inputs):
-    df_all  = pd.DataFrame([inputs])
-    df_dso1 = df_all[get_features(scaler_dso1)]
-    df_dso2 = df_all[get_features(model_dso2)]
-    df_dso3 = df_all[get_features(scaler_dso3)]
+        st.subheader("Mobility")
+        velocity = st.slider("Speed (m/s)", 0.0, 40.0, 5.0, step=0.5)
 
-    X_dso1_scaled = scaler_dso1.transform(df_dso1)
-    X_dso3_scaled = scaler_dso3.transform(df_dso3)
+        st.subheader("Neighbours")
+        num_nbr  = st.number_input("Number of visible neighbours", 0, 8, 2)
+        mean_nbr = st.slider("Mean neighbour RSRP (dBm)", -140.0, -40.0, -90.0, step=1.0)
+        best_nbr = st.slider("Best neighbour RSRP (dBm)", -140.0, -40.0, -88.0, step=1.0)
 
-    risk_score     = model_dso1.predict_proba(X_dso1_scaled)[0][1]
-    predicted_gain = model_dso2.predict(df_dso2)[0]
-    user_cluster   = model_dso3.predict(X_dso3_scaled)[0]
+        st.subheader("Temporal Context")
+        hour_of_day = st.slider("Hour of Day (0–23)", 0, 23,
+                                int(datetime.datetime.utcnow().hour))
+        day_of_week = st.slider("Day of Week (0=Mon … 6=Sun)", 0, 6,
+                                int(datetime.datetime.utcnow().weekday()))
 
-    master_inputs = {
-        'dso1_risk_score':     risk_score,
-        'dso2_predicted_gain': predicted_gain,
-        'dso3_cluster':        user_cluster,
-        'rsrp':                inputs.get('rsrp', -95.0),
-        'velocity':            inputs.get('velocity', 5.0)
-    }
-    dso4_df   = pd.DataFrame([master_inputs])
-    feat_dso4 = get_features(model_dso4)
-    if feat_dso4:
-        dso4_df = dso4_df[feat_dso4]
-    final_decision = model_dso4.predict(dso4_df)[0]
+        st.subheader("Signal History (Lag Features)")
+        rsrp_delta_3 = st.slider("RSRP change over last 3 steps (dBm)", -20.0, 20.0, 0.0, step=0.5,
+                                  help="Negative = signal already falling")
+        sinr_delta_3 = st.slider("SINR change over last 3 steps", -10.0, 10.0, 0.0, step=0.5)
 
-    return {
-        'risk_score':     risk_score,
-        'predicted_gain': predicted_gain,
-        'user_cluster':   user_cluster,
-        'final_decision': final_decision,
-        'df_dso1':        df_dso1,
-        'df_dso2':        df_dso2,
-        'df_dso3':        df_dso3,
-        'X_dso1_scaled':  X_dso1_scaled,
-        'X_dso3_scaled':  X_dso3_scaled,
-    }
+        st.subheader("Cell Load")
+        cell_hist_rate = st.slider("Cell historical throughput (Mbps)", 0.0, 150.0, 25.0, step=1.0)
+        cell_load_flag = st.checkbox("Cell congestion flag (bottom-25% hour)", value=False)
+
+        submitted = st.form_submit_button("🚀 Run AI Prediction", use_container_width=True, type="primary")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TAB 1 — PREDICTION
+# MAIN AREA
 # ─────────────────────────────────────────────────────────────────────────────
-with tab_main:
-    if submit_button:
-        result         = run_pipeline(user_inputs)
-        risk_score     = result['risk_score']
-        predicted_gain = result['predicted_gain']
-        user_cluster   = result['user_cluster']
-        final_decision = result['final_decision']
+st.title("📡 5G Master Handover Controller")
+st.caption("Stacked AI pipeline: DSO1 → DSO2 → DSO3 → DSO4")
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.info("🔴 DSO1: Drop Risk")
-            st.metric("Probability of Drop", f"{risk_score * 100:.1f}%")
-        with col2:
-            st.info("🟢 DSO2: Neighbor Gain")
-            st.metric("Predicted Signal Boost", f"{predicted_gain:+.2f} dBm")
-        with col3:
-            st.info("🔵 DSO3: Network Profile")
-            st.metric("User Cluster", f"Cluster {user_cluster}")
+if not submitted:
+    st.info("👈 Set the telemetry values in the sidebar and click **Run AI Prediction**.")
+    st.stop()
 
-        st.markdown("---")
-        if final_decision == 1:
-            st.error("🚨 DECISION: TRIGGER HANDOVER (1)")
-            st.markdown(f"> **AI Reasoning:** The user is in **Cluster {user_cluster}**. Drop risk is at **{risk_score*100:.1f}%**, and the neighbor tower offers a **{predicted_gain:+.2f} dBm** gain. Switching immediately to protect connection.")
-        else:
-            st.success("✅ DECISION: STAY ON CURRENT TOWER (0)")
-            st.markdown(f"> **AI Reasoning:** The user is stable. The current risk is low (**{risk_score*100:.1f}%**) and a handover is unnecessary at this time.")
-    else:
-        st.info("👈 Adjust the sliders on the left and click **'Run AI Prediction'** to see the results.")
+# Build user input dict and run pipeline
+user_inputs = {
+    "rsrp":                    rsrp,
+    "rsrq":                    rsrq,
+    "sinr":                    sinr,
+    "cqi":                     float(cqi),
+    "tx_power":                tx_pwr,
+    "ta":                      float(ta),
+    "velocity":                velocity,
+    "num_neighbors":           float(num_nbr),
+    "mean_neighbor_rsrp":      mean_nbr,
+    "best_neighbor_rsrp":      best_nbr,
+    "neighbor_gap":            best_nbr - rsrp,   # derived — consistent with training
+    "hour_of_day":             float(hour_of_day),
+    "day_of_week":             float(day_of_week),
+    "rsrp_delta_3":            rsrp_delta_3,
+    "sinr_delta_3":            sinr_delta_3,
+    "cell_hist_datarate_mean": cell_hist_rate,
+    "cell_load_drop_flag":     1.0 if cell_load_flag else 0.0,
+    "latency_is_imputed":      0.0,   # user is entering fresh data — not imputed
+    "is_ho":                   0.0,   # at inference time we don't know yet
+}
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TAB 2 — EXPLAINABILITY (SHAP)
-# ─────────────────────────────────────────────────────────────────────────────
-with tab_shap:
-    st.header("🔍 Explainability — Why did the AI decide this?")
-    st.markdown("""
-    **SHAP (SHapley Additive exPlanations)** shows how much each input feature 
-    *pushed* the model's output up or down. This makes the AI transparent and auditable.
-    """)
+with st.spinner("Running AI pipeline…"):
+    risk_score, predicted_gain, cluster, decision = run_pipeline(user_inputs)
 
-    if not submit_button:
-        st.warning("👈 Set your telemetry values on the left and click **Run AI Prediction** first.")
-    else:
-        try:
-            import shap
-            result = run_pipeline(user_inputs)
+# ── Final decision banner ────────────────────────────────────────────────────
+if decision == 1:
+    st.error("## 🚨 HANDOVER RECOMMENDED", icon="🚨")
+else:
+    st.success("## ✅ STAY ON CURRENT CELL", icon="✅")
 
-            st.subheader("DSO1 — Drop Risk Model (most critical)")
-            st.caption("Features that increase/decrease the probability of a connection drop.")
+st.markdown("---")
 
-            explainer_dso1  = shap.TreeExplainer(model_dso1)
-            shap_vals_dso1  = explainer_dso1.shap_values(result['X_dso1_scaled'])
-            feat_names_dso1 = get_features(scaler_dso1)
+# ── Four KPI cards ──────────────────────────────────────────────────────────
+col1, col2, col3, col4 = st.columns(4)
 
-            if isinstance(shap_vals_dso1, list):
-                sv = shap_vals_dso1[1][0]
-            else:
-                sv = shap_vals_dso1[0]
+risk_pct = risk_score * 100
+risk_delta_color = "inverse" if risk_pct > 50 else "normal"
+col1.metric(
+    "DSO1 — Drop Risk",
+    f"{risk_pct:.1f}%",
+    delta=f"{'High' if risk_pct > 50 else 'Low'} risk",
+    delta_color=risk_delta_color,
+)
 
-            shap_df = pd.DataFrame({
-                'Feature':     feat_names_dso1,
-                'SHAP Value':  sv,
-                'Input Value': [result['df_dso1'].iloc[0][f] for f in feat_names_dso1]
-            }).sort_values('SHAP Value', key=abs, ascending=False)
+gain_color = "normal" if predicted_gain > 0 else "inverse"
+col2.metric(
+    "DSO2 — Neighbour Gain",
+    f"{predicted_gain:+.2f} dBm",
+    delta="Switch improves signal" if predicted_gain > 3 else "Marginal gain",
+    delta_color=gain_color,
+)
 
-            def color_shap(val):
-                color = '#e74c3c' if val > 0 else '#2ecc71'
-                return f'color: {color}; font-weight: bold'
+cluster_label, cluster_desc = CLUSTER_LABELS.get(cluster, (f"Cluster {cluster}", ""))
+col3.metric(
+    "DSO3 — Network State",
+    cluster_label,
+    delta=cluster_desc,
+    delta_color="off",
+)
 
-            st.dataframe(
-                shap_df.style.applymap(color_shap, subset=['SHAP Value']),
-                use_container_width=True
-            )
+col4.metric(
+    "DSO4 — Decision",
+    "HANDOVER" if decision == 1 else "STAY",
+    delta="Action required" if decision == 1 else "Hold position",
+    delta_color="inverse" if decision == 1 else "normal",
+)
 
-            st.markdown("**Interpretation guide:**")
-            st.markdown("- 🔴 **Positive SHAP** → this feature is *increasing* the drop risk")
-            st.markdown("- 🟢 **Negative SHAP** → this feature is *reducing* the drop risk")
-            st.markdown("- The larger the absolute value, the more influential the feature")
+st.markdown("---")
 
-            st.markdown("---")
-            st.subheader("DSO2 — Neighbor Gain Model")
-            st.caption("Features driving the predicted signal gain from switching towers.")
+# ── Input summary and pipeline trace ────────────────────────────────────────
+with st.expander("🔍 Full Pipeline Trace"):
+    st.markdown("**Inputs used:**")
+    input_df = pd.DataFrame([user_inputs]).T.rename(columns={0: "Value"})
+    input_df.index.name = "Feature"
+    st.dataframe(input_df.style.format("{:.3f}"), use_container_width=True)
 
-            explainer_dso2  = shap.TreeExplainer(model_dso2)
-            shap_vals_dso2  = explainer_dso2.shap_values(result['df_dso2'])
-            feat_names_dso2 = get_features(model_dso2)
-
-            if isinstance(shap_vals_dso2, list):
-                sv2 = shap_vals_dso2[0]
-            else:
-                sv2 = shap_vals_dso2[0]
-
-            shap_df2 = pd.DataFrame({
-                'Feature':     feat_names_dso2,
-                'SHAP Value':  sv2,
-                'Input Value': [result['df_dso2'].iloc[0][f] for f in feat_names_dso2]
-            }).sort_values('SHAP Value', key=abs, ascending=False)
-
-            st.dataframe(
-                shap_df2.style.applymap(color_shap, subset=['SHAP Value']),
-                use_container_width=True
-            )
-
-        except ImportError:
-            st.error("SHAP is not installed. Add `shap` to your requirements.txt and rebuild the Docker image.")
-        except Exception as e:
-            st.error(f"SHAP computation error: {e}")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TAB 3 — BIAS & FAIRNESS
-# ─────────────────────────────────────────────────────────────────────────────
-with tab_bias:
-    st.header("⚖️ Bias Detection & Fairness")
-    st.markdown("""
-    A fair AI system should perform **equally well** across different user scenarios.
-    Here we check whether the model behaves consistently across the three deployment scenarios:
-    **H-Bahn** (high-speed rail), **Mobile** (pedestrian/vehicle), and **Static** (fixed users).
-    """)
-
-    scenarios = ['H-Bahn (High Speed)', 'Mobile (Normal)', 'Static (Fixed)']
-    metrics = pd.DataFrame({
-        'Scenario':  scenarios,
-        'Accuracy':  [0.91, 0.94, 0.96],
-        'Precision': [0.89, 0.93, 0.95],
-        'Recall':    [0.88, 0.92, 0.97],
-        'F1-Score':  [0.885, 0.925, 0.96],
-        'Drop Rate': [0.12, 0.07, 0.04],
+    st.markdown("**Chained DSO outputs:**")
+    chain_df = pd.DataFrame({
+        "Stage": ["DSO1", "DSO2", "DSO3", "DSO4"],
+        "Model": ["XGBoost Classifier", "XGBoost Regressor (honest)", "K-Means (k=4)", "XGBoost Controller"],
+        "Output": [f"{risk_score:.4f} (risk prob)", f"{predicted_gain:.3f} dBm gain",
+                   f"Cluster {cluster} — {cluster_label}", f"{'Handover (1)' if decision == 1 else 'Stay (0)'}"],
     })
+    st.dataframe(chain_df, use_container_width=True, hide_index=True)
 
-    st.subheader("Model Performance by Scenario")
-    st.dataframe(metrics.set_index('Scenario'), use_container_width=True)
-
-    acc_gap = metrics['Accuracy'].max() - metrics['Accuracy'].min()
-    if acc_gap > 0.05:
-        st.warning(f"⚠️ Accuracy gap across scenarios: **{acc_gap:.2%}** — bias mitigation recommended.")
-    else:
-        st.success(f"✅ Accuracy gap across scenarios: **{acc_gap:.2%}** — model is fairly consistent.")
-
-    st.markdown("---")
-    st.subheader("📊 Performance Gap Visualisation")
-    chart_data = metrics.set_index('Scenario')[['Accuracy', 'Precision', 'Recall', 'F1-Score']]
-    st.bar_chart(chart_data)
-
-    st.markdown("---")
-    st.subheader("🛠️ Bias Mitigation Applied")
-    st.markdown("""
-    | Technique | Applied | Details |
-    |---|---|---|
-    | Stratified train/test split | ✅ | Equal representation of all 3 scenarios |
-    | Per-scenario evaluation | ✅ | Metrics computed separately per group |
-    | Class weighting (scale_pos_weight) | ✅ | Minority class penalised 4× more |
-    | Threshold tuning per scenario | 🔄 Planned | Adjust decision boundary per mobility type |
-    """)
-
-    st.markdown("---")
-    st.subheader("📍 Current Input — Scenario Detection")
-    vel_val = user_inputs.get('velocity', 5.0)
-
-    if vel_val > 20:
-        st.warning("Detected scenario: **H-Bahn (High Speed)** — high velocity detected. Monitor predictions carefully.")
-    elif vel_val > 3:
-        st.success("Detected scenario: **Mobile (Normal)** — well-represented in training data.")
-    else:
-        st.success("Detected scenario: **Static (Fixed)** — well-represented in training data.")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TAB 4 — CONCEPT DRIFT
-# ─────────────────────────────────────────────────────────────────────────────
-with tab_drift:
-    st.header("📉 Concept Drift Detection")
-    st.markdown("""
-    **Concept drift** happens when real-world data starts to differ from what the model was trained on.
-    For 5G networks this can happen due to: new towers being deployed, seasonal traffic changes, 
-    or network upgrades changing signal characteristics.
-    
-    We compare your **current input** against the **training data distribution** 
-    to detect if the model might be operating outside its reliable range.
-    """)
-
-    training_stats = {
-        'rsrp':               {'mean': -90.7, 'std': 12.5},
-        'sinr':               {'mean': 11.2,  'std': 8.3},
-        'velocity':           {'mean': 8.4,   'std': 9.1},
-        'mean_latency':       {'mean': 42.6,  'std': 18.3},
-        'num_neighbors':      {'mean': 2.3,   'std': 1.1},
-        'mean_neighbor_rsrp': {'mean': -91.0, 'std': 11.8},
-    }
-
-    st.subheader("Feature Drift Check — Current Input vs Training Distribution")
-
-    drift_rows = []
-    for feat, stats in training_stats.items():
-        current_val = user_inputs.get(feat, stats['mean'])
-        z_score     = abs((current_val - stats['mean']) / stats['std']) if stats['std'] > 0 else 0
-        drift_flag  = "🔴 DRIFT" if z_score > 2.5 else ("🟡 WATCH" if z_score > 1.5 else "🟢 OK")
-        drift_rows.append({
-            'Feature':    feat,
-            'Your Value': round(current_val, 2),
-            'Train Mean': stats['mean'],
-            'Train Std':  stats['std'],
-            'Z-Score':    round(z_score, 2),
-            'Status':     drift_flag
-        })
-
-    drift_df = pd.DataFrame(drift_rows)
-    st.dataframe(drift_df.set_index('Feature'), use_container_width=True)
-
-    drifted = [r for r in drift_rows if '🔴' in r['Status']]
-    watched = [r for r in drift_rows if '🟡' in r['Status']]
-
-    if drifted:
-        st.error(f"🚨 **{len(drifted)} feature(s) show significant drift:** {', '.join(r['Feature'] for r in drifted)}")
-        st.markdown("Predictions in this region may be **less reliable**. Consider retraining the model with fresh data.")
-    elif watched:
-        st.warning(f"⚠️ **{len(watched)} feature(s) approaching drift boundary:** {', '.join(r['Feature'] for r in watched)}")
-    else:
-        st.success("✅ All input features are within the expected training distribution. Model predictions are reliable.")
-
-    st.markdown("---")
-    st.subheader("📋 Drift Monitoring Strategy")
-    st.markdown("""
-    | Method | Status | Details |
-    |---|---|---|
-    | Z-score monitoring | ✅ Live | Flags inputs > 2.5 std from training mean |
-    | KS-test on batches | ✅ Implemented | Scipy KS-test on feature distributions |
-    | Population Stability Index (PSI) | 🔄 Planned | Monthly batch comparison |
-    | Automated retraining trigger | 🔄 Planned | Retrain when drift detected on key features |
-    | Jenkins pipeline retraining job | 🔄 Planned | CI/CD triggers model refresh automatically |
-    """)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TAB 5 — SECURITY & ANOMALY MONITORING
-# ─────────────────────────────────────────────────────────────────────────────
-with tab_security:
-    st.header("🔒 Security & Anomaly Detection")
-    st.markdown("""
-    A trustworthy AI must be **secure by design**. This tab monitors for suspicious inputs 
-    that could indicate sensor faults, data corruption, or adversarial attacks on the 
-    telemetry pipeline.
-    """)
-
-    st.subheader("🕵️ Real-Time Input Anomaly Check")
-
-    physical_bounds = {
-        'rsrp':               (-140.0, -40.0,  "RSRP must be between -140 and -40 dBm"),
-        'sinr':               (-20.0,   40.0,  "SINR must be between -20 and 40 dB"),
-        'velocity':           (0.0,     60.0,  "Velocity cannot be negative or exceed 60 m/s"),
-        'mean_latency':       (1.0,    500.0,  "Latency must be between 1 and 500 ms"),
-        'num_neighbors':      (0.0,      8.0,  "Neighbor count must be 0-8"),
-        'mean_neighbor_rsrp': (-140.0, -40.0,  "Neighbor RSRP must be between -140 and -40 dBm"),
-    }
-
-    anomalies     = []
-    warnings_list = []
-    clean_checks  = []
-
-    for feat, (low, high, msg) in physical_bounds.items():
-        val = user_inputs.get(feat, None)
-        if val is None:
-            continue
-        if val < low or val > high:
-            anomalies.append({'Feature': feat, 'Value': val, 'Issue': msg})
-        else:
-            margin = (high - low) * 0.05
-            if val < low + margin or val > high - margin:
-                warnings_list.append({'Feature': feat, 'Value': val, 'Issue': f"Extreme value near boundary ({low}–{high})"})
-            else:
-                clean_checks.append(feat)
-
-    if anomalies:
-        st.error(f"🚨 {len(anomalies)} ANOMALY(IES) DETECTED — input may be corrupted or adversarial!")
-        st.dataframe(pd.DataFrame(anomalies), use_container_width=True)
-    elif warnings_list:
-        st.warning(f"⚠️ {len(warnings_list)} value(s) are extreme but within bounds:")
-        st.dataframe(pd.DataFrame(warnings_list), use_container_width=True)
-    else:
-        st.success(f"✅ All {len(clean_checks)} checked features pass physical bounds validation.")
-
-    st.markdown("---")
-    st.subheader("🔗 Signal Consistency Check")
-
-    rsrp_val      = user_inputs.get('rsrp', -95.0)
-    sinr_val      = user_inputs.get('sinr', 10.0)
-    neighbor_rsrp = user_inputs.get('mean_neighbor_rsrp', -90.0)
-
-    consistency_issues = []
-    if rsrp_val < -115 and sinr_val > 20:
-        consistency_issues.append("RSRP is very weak (<-115 dBm) but SINR is very high (>20 dB) — physically inconsistent.")
-    if neighbor_rsrp > rsrp_val + 20:
-        consistency_issues.append(f"Neighbor RSRP ({neighbor_rsrp} dBm) is {neighbor_rsrp - rsrp_val:.0f} dBm stronger than serving cell — handover should already have occurred.")
-
-    if consistency_issues:
-        for issue in consistency_issues:
-            st.warning(f"⚠️ {issue}")
-    else:
-        st.success("✅ Signal values are physically consistent with each other.")
-
-    st.markdown("---")
-    st.subheader("🛡️ Security Measures Overview")
-    st.markdown("""
-    | Measure | Status | Details |
-    |---|---|---|
-    | Streamlit authentication | ✅ Live | HMAC-secured login, session-state gated |
-    | Input bounds validation | ✅ Live | Physical min/max enforced on all features |
-    | Signal consistency checks | ✅ Live | Cross-feature plausibility verified |
-    | Non-root Docker container | ✅ Done | App runs as appuser, not root |
-    | Docker health check | ✅ Done | Auto-restart if app becomes unresponsive |
-    | No external data egress | ✅ Done | App runs fully offline, no data sent out |
-    | Audit logging | ✅ Live | Every prediction logged with timestamp |
-    | Encrypted model storage | 🔄 Planned | Encrypt .pkl files at rest |
-    | Rate limiting | 🔄 Planned | Prevent brute-force probing of the model |
-    """)
-
-    st.markdown("---")
-    st.subheader("📝 Prediction Audit Log")
-    st.caption("Every prediction is logged here with timestamp, inputs, and output for accountability.")
-
-    if submit_button:
-        result = run_pipeline(user_inputs)
-        import datetime
-        log_entry = {
-            'Timestamp':        datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'User':             st.session_state.get('username', 'unknown'),
-            'RSRP':             user_inputs.get('rsrp', 'N/A'),
-            'SINR':             user_inputs.get('sinr', 'N/A'),
-            'Velocity':         user_inputs.get('velocity', 'N/A'),
-            'Risk Score':       f"{result['risk_score']:.3f}",
-            'Decision':         'HANDOVER' if result['final_decision'] == 1 else 'STAY',
-            'Anomalies Found':  len(anomalies),
-        }
-        st.dataframe(pd.DataFrame([log_entry]), use_container_width=True)
-        st.caption("✅ Prediction logged. In production this would be written to a database.")
-    else:
-        st.info("Run a prediction to generate an audit log entry.")
+# ── Risk gauge (simple visual) ───────────────────────────────────────────────
+st.markdown("### Risk Level")
+bar_color = "#e74c3c" if risk_pct > 60 else ("#f39c12" if risk_pct > 30 else "#2ecc71")
+st.markdown(
+    f"""
+    <div style="background:#eee; border-radius:8px; height:28px; width:100%; margin-bottom:4px">
+      <div style="background:{bar_color}; width:{risk_pct:.1f}%; height:100%;
+                  border-radius:8px; transition:width 0.5s;
+                  display:flex; align-items:center; padding-left:10px; color:white; font-weight:bold">
+        {risk_pct:.1f}%
+      </div>
+    </div>
+    <p style="color:gray; font-size:0.85em; margin:0">
+      0% = no risk of degradation &nbsp;|&nbsp; 100% = certain degradation
+    </p>
+    """,
+    unsafe_allow_html=True,
+)

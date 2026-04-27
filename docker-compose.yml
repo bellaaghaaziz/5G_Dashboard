@@ -1,0 +1,58 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# docker-compose.yml — 5G Handover AI: Full Stack
+#
+# Services:
+#   api      — FastAPI inference server (port 8000)
+#   app      — Streamlit dashboard (port 8501)
+#   mlflow   — MLflow tracking UI (port 5000)
+#
+# Usage:
+#   docker compose up -d                # start all
+#   docker compose up api               # start API only
+#   docker compose down                 # stop all
+#   make compose-up / make compose-down
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+
+  api:
+    build: .
+    container_name: 5g-api
+    command: ["api"]
+    ports:
+      - "8000:8000"
+    environment:
+      - ELASTICSEARCH_HOST=http://elasticsearch:9200
+      - PYTHONPATH=/app
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  app:
+    build: .
+    container_name: 5g-dashboard
+    command: ["streamlit"]
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://api:8000
+      - PYTHONPATH=/app
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mlflow:
+    build: .
+    container_name: 5g-mlflow
+    command: ["mlflow-ui"]
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns:/app/mlruns
+    restart: unless-stopped

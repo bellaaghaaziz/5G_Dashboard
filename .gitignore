@@ -1,0 +1,33 @@
+# Virtual environments
+env/
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Node.js
+node_modules/
+dist/
+build/
+.npm/
+
+# Logs and databases
+logs/
+*.log
+mlflow.db
+mlruns/
+metrics.json
+
+# Datasets and large files
+DATASET/
+*.csv
+*.parquet
+
+# IDE and Editor files
+.vscode/
+.idea/
+.ipynb_checkpoints/
+
+# Secrets
+.streamlit/secrets.toml
+.env
