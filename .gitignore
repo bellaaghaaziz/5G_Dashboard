@@ -1,33 +1,54 @@
-# Virtual environments
+# ── Python ─────────────────────────────────────────────
 env/
 venv/
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
 
-# Node.js
+# ── Node.js ────────────────────────────────────────────
 node_modules/
 dist/
 build/
 .npm/
 
-# Logs and databases
+# ── Logs & Runtime ─────────────────────────────────────
 logs/
 *.log
 mlflow.db
 mlruns/
-metrics.json
 
-# Datasets and large files
+# ── Dataset & Large Files ──────────────────────────────
 DATASET/
 *.csv
 *.parquet
 
-# IDE and Editor files
+# ── Trained Models (large binary files) ───────────────
+# Uncomment below to exclude model .pkl files from git
+# (they can be regenerated with: python mlops/train.py train)
+# *.pkl
+# *.keras
+# models/
+
+# ── IDE & Editor ───────────────────────────────────────
 .vscode/
 .idea/
 .ipynb_checkpoints/
+*.swp
+*.swo
 
-# Secrets
+# ── Secrets ────────────────────────────────────────────
 .streamlit/secrets.toml
 .env
+.env.local
+.env.production
+
+# ── OS ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Metrics (regenerated on train) ─────────────────────
+metrics.json

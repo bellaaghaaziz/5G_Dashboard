@@ -1,4 +1,4 @@
-﻿import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import { Roles } from "../auth/roles.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
@@ -10,7 +10,7 @@ import { UsersService } from "./users.service";
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles("admin")
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(@Inject(UsersService) private readonly usersService: UsersService) {}
 
   @Get()
   async list() {

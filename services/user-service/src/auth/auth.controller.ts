@@ -1,4 +1,4 @@
-﻿import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Post, Req, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "./jwt-auth.guard";
 import { RefreshDto } from "./refresh.dto";
 import { SignInDto } from "./signin.dto";
@@ -7,7 +7,7 @@ import { CreateUserDto } from "../users/create-user.dto";
 
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(@Inject(AuthService) private readonly authService: AuthService) {}
 
   @Post("signup")
   signUp(@Body() dto: CreateUserDto) {

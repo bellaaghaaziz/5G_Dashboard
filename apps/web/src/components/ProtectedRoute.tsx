@@ -1,4 +1,4 @@
-﻿import { Navigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { useAuth } from "../context/auth";
 
 export function ProtectedRoute({
@@ -11,7 +11,7 @@ export function ProtectedRoute({
   const { token, role } = useAuth();
 
   if (!token || !role) return <Navigate to="/login" replace />;
-  if (!allowedRoles.includes(role)) return <Navigate to="/" replace />;
+  if (!allowedRoles.includes(role)) return <Navigate to="/app/home" replace />;
 
   return <>{children}</>;
 }

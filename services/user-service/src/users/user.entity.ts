@@ -1,4 +1,4 @@
-﻿import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
 import { UserRole } from "../common/roles";
 
 @Entity("users")
@@ -6,13 +6,13 @@ export class User {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
-  @Column({ unique: true })
+  @Column({ type: "varchar", unique: true })
   email!: string;
 
-  @Column()
+  @Column({ type: "varchar" })
   fullName!: string;
 
-  @Column()
+  @Column({ type: "varchar" })
   passwordHash!: string;
 
   @Column({ type: "varchar", default: "network_operator" })
@@ -21,9 +21,9 @@ export class User {
   @Column({ type: "varchar", nullable: true })
   refreshTokenHash?: string | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: "timestamp" })
   createdAt!: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: "timestamp" })
   updatedAt!: Date;
 }

@@ -1,200 +1,167 @@
 import AdminPanelSettingsRoundedIcon from "@mui/icons-material/AdminPanelSettingsRounded";
 import AnalyticsRoundedIcon from "@mui/icons-material/AnalyticsRounded";
+import HomeRoundedIcon from "@mui/icons-material/HomeRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import MapRoundedIcon from "@mui/icons-material/MapRounded";
 import ScienceRoundedIcon from "@mui/icons-material/ScienceRounded";
-import RadarRoundedIcon from "@mui/icons-material/RadarRounded";
-import DeviceHubRoundedIcon from "@mui/icons-material/DeviceHubRounded";
-import { Avatar, Box, Button, Chip, Divider, Stack, Typography } from "@mui/material";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import SignalCellularAltRoundedIcon from "@mui/icons-material/SignalCellularAltRounded";
+import { Avatar, Box, Chip, Divider, IconButton, Stack, Tooltip, Typography } from "@mui/material";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/auth";
 
 export function Layout() {
   const { role, email, logout } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
-  const navItems = [
+  const navSections = [
     {
-      label: "Operator",
-      to: "/operator",
-      icon: <MapRoundedIcon fontSize="small" />,
-      show: role === "network_operator" || role === "admin",
+      label: "Workspace",
+      items: [
+        { label: "Home", to: "/app/home", icon: <HomeRoundedIcon />, show: true },
+        { label: "Operator", to: "/app/operator", icon: <MapRoundedIcon />, show: role === "network_operator" || role === "admin" },
+        { label: "Data Scientist", to: "/app/scientist", icon: <ScienceRoundedIcon />, show: role === "data_scientist" || role === "admin" },
+        { label: "Admin", to: "/app/admin", icon: <AdminPanelSettingsRoundedIcon />, show: role === "admin" },
+      ],
     },
     {
-      label: "Data Scientist",
-      to: "/scientist",
-      icon: <ScienceRoundedIcon fontSize="small" />,
-      show: role === "data_scientist" || role === "admin",
-    },
-    {
-      label: "Admin",
-      to: "/admin",
-      icon: <AdminPanelSettingsRoundedIcon fontSize="small" />,
-      show: role === "admin",
-    },
-    {
-      label: "Overview",
-      to: "/home",
-      icon: <AnalyticsRoundedIcon fontSize="small" />,
-      show: true,
+      label: "Analytics",
+      items: [
+        { label: "Live Metrics", to: "/app/operator", icon: <AnalyticsRoundedIcon />, show: true },
+      ],
     },
   ];
 
+  const currentLabel = navSections.flatMap(s => s.items).find(n => location.pathname.startsWith(n.to))?.label ?? "Dashboard";
+
+  const roleConfig: Record<string, { label: string; color: string }> = {
+    admin: { label: "Admin", color: "#ef4444" },
+    network_operator: { label: "Operator", color: "#22d3ee" },
+    data_scientist: { label: "Scientist", color: "#a855f7" },
+  };
+  const rc = roleConfig[role ?? ""] ?? { label: role ?? "", color: "#94a3b8" };
+
+  function handleLogout() {
+    logout();
+    navigate("/");
+  }
+
   return (
-    <Box
-      sx={{
-        minHeight: "100vh",
-        display: "grid",
-        gridTemplateColumns: { xs: "1fr", md: "260px 1fr" },
-        backgroundColor: "background.default",
-      }}
-    >
-      <Box
-        sx={{
-          p: 3,
-          backgroundColor: "#1a1a1a",
-          color: "#fff",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <Box sx={{ mb: 4, display: "flex", alignItems: "center", gap: 1.5 }}>
-          <Box
-            sx={{
-              width: 32,
-              height: 32,
-              borderRadius: "50%",
-              backgroundColor: "primary.main",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#000",
-              fontWeight: 900,
-            }}
-          >
-            F
-          </Box>
-          <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: -0.5 }}>
-            5G Platform
-          </Typography>
-        </Box>
-
-        <Typography variant="overline" sx={{ color: "rgba(255,255,255,0.4)", mb: 1, fontWeight: 700 }}>
-          NETWORK
-        </Typography>
-        <Stack spacing={0.5} sx={{ mt: 1, mb: 4 }}>
-          {navItems
-            .filter((item) => item.show)
-            .map((item) => (
-              <Button
-                key={item.to}
-                component={Link}
-                to={item.to}
-                startIcon={item.icon}
-                fullWidth
-                sx={{
-                  justifyContent: "flex-start",
-                  textTransform: "none",
-                  py: 1.2,
-                  px: 2,
-                  color: location.pathname.startsWith(item.to) ? "#000" : "rgba(255,255,255,0.7)",
-                  backgroundColor: location.pathname.startsWith(item.to) ? "primary.main" : "transparent",
-                  "&:hover": {
-                    backgroundColor: location.pathname.startsWith(item.to)
-                      ? "primary.main"
-                      : "rgba(255,255,255,0.05)",
-                  },
-                  borderRadius: 1,
-                  fontWeight: 600,
-                }}
-              >
-                {item.label}
-              </Button>
-            ))}
-        </Stack>
-
-        <Typography variant="overline" sx={{ color: "rgba(255,255,255,0.4)", mb: 1, fontWeight: 700 }}>
-          ANALYTICS
-        </Typography>
-        <Stack spacing={0.5}>
-          <Button
-            startIcon={<AnalyticsRoundedIcon fontSize="small" />}
-            fullWidth
-            sx={{
-              justifyContent: "flex-start",
-              textTransform: "none",
-              py: 1.2,
-              px: 2,
-              color: "rgba(255,255,255,0.7)",
-              "&:hover": { backgroundColor: "rgba(255,255,255,0.05)" },
-            }}
-          >
-            Traffic Reports
-          </Button>
-        </Stack>
-      </Box>
-
-      <Box sx={{ p: { xs: 2, md: 4 }, display: "flex", flexDirection: "column", gap: 3 }}>
-        {/* Top Header Bar */}
-        <Box
-          sx={{
-            p: 2,
-            px: 3,
-            borderRadius: 2,
-            backgroundColor: "#fff",
-            boxShadow: "0 1px 3px 0 rgba(0,0,0,0.05)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600, color: "text.secondary" }}>
-              Dashboard {">"}{" "}
-              <span style={{ color: "#1a1a1a" }}>{navItems.find((n) => location.pathname.startsWith(n.to))?.label}</span>
-            </Typography>
-          </Box>
-          <Stack direction="row" spacing={3} alignItems="center">
-            <Stack direction="row" spacing={2} sx={{ color: "text.secondary" }}>
-              <Box sx={{ position: "relative" }}>
-                <RadarRoundedIcon sx={{ fontSize: 20 }} />
-                <Box
-                  sx={{
-                    position: "absolute",
-                    top: -2,
-                    right: -2,
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    backgroundColor: "error.main",
-                    border: "2px solid #fff",
-                  }}
-                />
-              </Box>
-              <DeviceHubRoundedIcon sx={{ fontSize: 20 }} />
-            </Stack>
-            <Divider orientation="vertical" flexItem sx={{ my: 1 }} />
-            <Stack direction="row" spacing={1.5} alignItems="center">
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {email?.split("@")[0] ?? "User"}
-              </Typography>
-              <Avatar
-                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`}
-                sx={{ width: 36, height: 36 }}
-              />
-              <Button
-                variant="text"
-                size="small"
-                onClick={logout}
-                sx={{ minWidth: 0, p: 0.5, color: "text.secondary" }}
-              >
-                <LogoutRoundedIcon fontSize="small" />
-              </Button>
-            </Stack>
+    <Box sx={{ minHeight: "100vh", display: "flex", background: "#050d1a" }}>
+      {/* ── SIDEBAR ── */}
+      <Box sx={{
+        width: 260, flexShrink: 0,
+        background: "rgba(8,15,30,0.95)",
+        borderRight: "1px solid rgba(255,255,255,0.05)",
+        display: "flex", flexDirection: "column",
+        position: "fixed", top: 0, bottom: 0, left: 0, zIndex: 50,
+        backdropFilter: "blur(20px)",
+      }}>
+        {/* Logo */}
+        <Box sx={{ p: 3, pb: 2, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+          <Stack direction="row" alignItems="center" spacing={1.5}>
+            <Box sx={{
+              width: 38, height: 38, borderRadius: "11px",
+              background: "linear-gradient(135deg,#22d3ee,#3b82f6)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#fff", fontWeight: 900, fontSize: 13, flexShrink: 0,
+              boxShadow: "0 4px 16px rgba(34,211,238,0.3)",
+            }}>5G</Box>
+            <Box>
+              <Typography sx={{ fontWeight: 900, fontSize: 17, lineHeight: 1, letterSpacing: -0.5 }}>CellPilot</Typography>
+              <Typography sx={{ fontSize: 10, color: "#334155", fontWeight: 600, letterSpacing: 1.5, textTransform: "uppercase", mt: 0.3 }}>5G Platform</Typography>
+            </Box>
           </Stack>
         </Box>
 
-        <Box>
+        {/* Live badge */}
+        <Box sx={{ px: 3, py: 1.5 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, p: "10px 14px", borderRadius: 2, background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.12)" }}>
+            <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: "#22c55e", animation: "pulse 2s infinite", "@keyframes pulse": { "0%": { boxShadow: "0 0 0 0 rgba(34,197,94,0.6)" }, "70%": { boxShadow: "0 0 0 5px rgba(34,197,94,0)" }, "100%": { boxShadow: "0 0 0 0 rgba(34,197,94,0)" } } }} />
+            <Box>
+              <Typography sx={{ fontSize: 11, fontWeight: 700, color: "#22c55e", lineHeight: 1 }}>LIVE DATA STREAMING</Typography>
+              <Typography sx={{ fontSize: 10, color: "#164e13", fontWeight: 500, mt: 0.2 }}>DSO Pipeline Active</Typography>
+            </Box>
+            <SignalCellularAltRoundedIcon sx={{ ml: "auto", color: "#22c55e", fontSize: 16 }} />
+          </Box>
+        </Box>
+
+        {/* Nav */}
+        <Box sx={{ flex: 1, overflowY: "auto", px: 2, py: 1 }}>
+          {navSections.map(sec => (
+            <Box key={sec.label} sx={{ mb: 3 }}>
+              <Typography sx={{ fontSize: 10, fontWeight: 700, color: "#1e3a5f", letterSpacing: 2, textTransform: "uppercase", px: 1, mb: 1 }}>{sec.label}</Typography>
+              <Stack spacing={0.5}>
+                {sec.items.filter(i => i.show).map(item => {
+                  const active = location.pathname.startsWith(item.to);
+                  return (
+                    <Link key={item.to} to={item.to} style={{ textDecoration: "none" }}>
+                      <Box sx={{
+                        display: "flex", alignItems: "center", gap: 1.5,
+                        px: 2, py: 1.3, borderRadius: 2,
+                        background: active ? "rgba(34,211,238,0.12)" : "transparent",
+                        border: active ? "1px solid rgba(34,211,238,0.2)" : "1px solid transparent",
+                        color: active ? "#22d3ee" : "#475569",
+                        transition: "all 0.2s",
+                        "&:hover": { background: active ? "rgba(34,211,238,0.12)" : "rgba(255,255,255,0.04)", color: active ? "#22d3ee" : "#94a3b8" },
+                        cursor: "pointer",
+                      }}>
+                        <Box sx={{ "& .MuiSvgIcon-root": { fontSize: 18 }, color: active ? "#22d3ee" : "#334155", flexShrink: 0 }}>{item.icon}</Box>
+                        <Typography sx={{ fontSize: 14, fontWeight: active ? 700 : 500, color: "inherit" }}>{item.label}</Typography>
+                        {active && <Box sx={{ ml: "auto", width: 6, height: 6, borderRadius: "50%", bgcolor: "#22d3ee" }} />}
+                      </Box>
+                    </Link>
+                  );
+                })}
+              </Stack>
+            </Box>
+          ))}
+        </Box>
+
+        {/* User profile */}
+        <Box sx={{ p: 2, borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Avatar src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`} sx={{ width: 36, height: 36, border: "2px solid rgba(34,211,238,0.2)" }} />
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email?.split("@")[0] ?? "User"}</Typography>
+              <Chip label={rc.label} size="small" sx={{ height: 18, fontSize: 10, fontWeight: 700, bgcolor: `${rc.color}18`, color: rc.color, border: `1px solid ${rc.color}30`, mt: 0.3 }} />
+            </Box>
+            <Tooltip title="Sign out">
+              <IconButton onClick={handleLogout} size="small" sx={{ color: "#1e3a5f", "&:hover": { color: "#ef4444", bgcolor: "rgba(239,68,68,0.08)" } }}>
+                <LogoutRoundedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Stack>
+        </Box>
+      </Box>
+
+      {/* ── MAIN ── */}
+      <Box sx={{ flex: 1, ml: "260px", display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+        {/* Topbar */}
+        <Box sx={{
+          position: "sticky", top: 0, zIndex: 40,
+          px: 4, py: 1.8,
+          background: "rgba(5,13,26,0.85)", backdropFilter: "blur(20px)",
+          borderBottom: "1px solid rgba(255,255,255,0.04)",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography sx={{ fontSize: 13, color: "#334155", fontWeight: 500 }}>CellPilot</Typography>
+            <Typography sx={{ fontSize: 13, color: "#1e3a5f" }}>›</Typography>
+            <Typography sx={{ fontSize: 13, color: "#94a3b8", fontWeight: 600 }}>{currentLabel}</Typography>
+          </Stack>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 2, py: 0.7, borderRadius: 2, bgcolor: "rgba(34,197,94,0.07)", border: "1px solid rgba(34,197,94,0.12)" }}>
+              <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: "#22c55e" }} />
+              <Typography sx={{ fontSize: 11, fontWeight: 700, color: "#22c55e" }}>LIVE</Typography>
+            </Box>
+            <Divider orientation="vertical" flexItem sx={{ borderColor: "rgba(255,255,255,0.06)", my: 0.5 }} />
+            <Typography sx={{ fontSize: 13, color: "#334155" }}>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Typography>
+          </Stack>
+        </Box>
+
+        {/* Page content */}
+        <Box sx={{ flex: 1, p: 4 }}>
           <Outlet />
         </Box>
       </Box>

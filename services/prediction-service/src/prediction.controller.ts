@@ -1,10 +1,10 @@
-﻿import { Body, Controller, Get, Post } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Post } from "@nestjs/common";
 import { PredictionInputDto } from "./prediction-input.dto";
 import { PredictionService } from "./prediction.service";
 
 @Controller()
 export class PredictionController {
-  constructor(private readonly predictionService: PredictionService) {}
+  constructor(@Inject(PredictionService) private readonly predictionService: PredictionService) {}
 
   @Get("health")
   health() {

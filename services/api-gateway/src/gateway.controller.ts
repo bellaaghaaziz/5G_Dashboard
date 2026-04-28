@@ -1,4 +1,4 @@
-﻿import { Body, Controller, Get, Headers, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Inject, Post, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
 import { Roles } from "./auth/roles.decorator";
 import { RolesGuard } from "./auth/roles.guard";
@@ -6,12 +6,14 @@ import { GatewayService } from "./gateway.service";
 
 @Controller()
 export class GatewayController {
-  constructor(private readonly gatewayService: GatewayService) {}
+  constructor(@Inject(GatewayService) private readonly gatewayService: GatewayService) {}
 
   @Get("health")
   health() {
     return { status: "ok", service: "api-gateway" };
   }
+
+  // ── Auth ──
 
   @Post("auth/signup")
   signup(@Body() body: unknown) {
@@ -40,6 +42,8 @@ export class GatewayController {
     return this.gatewayService.proxyToUser("/auth/me", "GET", undefined, authHeader);
   }
 
+  // ── Admin ──
+
   @Get("admin/users")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("admin")
@@ -54,12 +58,16 @@ export class GatewayController {
     return this.gatewayService.proxyToUser("/users", "POST", body, authHeader);
   }
 
+  // ── Prediction ──
+
   @Post("predict")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("network_operator", "data_scientist", "admin")
   predict(@Body() body: unknown) {
     return this.gatewayService.proxyToPrediction("/predict", "POST", body);
   }
+
+  // ── Operator ──
 
   @Get("operator/overview")
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -75,10 +83,70 @@ export class GatewayController {
     return this.gatewayService.proxyToDashboard("/operator/map-events", "GET");
   }
 
+  @Post("operator/playback")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  setPlayback(@Body() body: unknown) {
+    return this.gatewayService.proxyToDashboard("/operator/playback", "POST", body);
+  }
+
+  @Get("operator/playback")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  getPlayback() {
+    return this.gatewayService.proxyToDashboard("/operator/playback", "GET");
+  }
+
+  @Get("operator/ue-types")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  getUETypes() {
+    return this.gatewayService.proxyToDashboard("/operator/ue-types", "GET");
+  }
+
+  @Get("operator/dataset-info")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  getDatasetInfo() {
+    return this.gatewayService.proxyToDashboard("/operator/dataset-info", "GET");
+  }
+
+  // ── Scientist ──
+
   @Get("scientist/metrics")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("data_scientist", "admin")
   scientistMetrics() {
     return this.gatewayService.proxyToDashboard("/scientist/metrics", "GET");
+  }
+
+  @Get("scientist/drift")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("data_scientist", "admin")
+  getDrift() {
+    return this.gatewayService.proxyToDashboard("/scientist/drift", "GET");
+  }
+
+  @Post("scientist/retrain")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("data_scientist", "admin")
+  startRetrain() {
+    return this.gatewayService.proxyToDashboardLong("/scientist/retrain", "POST");
+  }
+
+  @Get("scientist/retrain-status")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("data_scientist", "admin")
+  getRetrainStatus() {
+    return this.gatewayService.proxyToDashboard("/scientist/retrain-status", "GET");
+  }
+
+  // ── System Health ──
+
+  @Get("system/health")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("admin")
+  systemHealth() {
+    return this.gatewayService.proxyToDashboard("/system/health", "GET");
   }
 }

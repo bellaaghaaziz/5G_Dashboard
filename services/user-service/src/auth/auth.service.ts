@@ -1,4 +1,4 @@
-﻿import { BadRequestException, Injectable, OnModuleInit, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, OnModuleInit, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
@@ -12,9 +12,9 @@ import { SignInDto } from "./signin.dto";
 @Injectable()
 export class AuthService implements OnModuleInit {
   constructor(
-    private readonly usersService: UsersService,
-    private readonly jwtService: JwtService,
-    private readonly config: ConfigService,
+    @Inject(UsersService) private readonly usersService: UsersService,
+    @Inject(JwtService) private readonly jwtService: JwtService,
+    @Inject(ConfigService) private readonly config: ConfigService,
   ) {}
 
   async onModuleInit() {

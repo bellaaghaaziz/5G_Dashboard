@@ -1,4 +1,4 @@
-﻿import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import axios from "axios";
 import { PredictionInputDto } from "./prediction-input.dto";
@@ -7,7 +7,7 @@ import { PredictionInputDto } from "./prediction-input.dto";
 export class PredictionService {
   private readonly baseUrl: string;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(@Inject(ConfigService) private readonly config: ConfigService) {
     this.baseUrl = this.config.get<string>("PYTHON_INFERENCE_BASE_URL", "http://localhost:8000");
   }
 
