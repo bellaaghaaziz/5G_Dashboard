@@ -66,6 +66,13 @@ class UE:
         self.lat = random.uniform(LAT_MIN, LAT_MAX)
         self.lng = random.uniform(LNG_MIN, LNG_MAX)
         self.phase = random.uniform(0, 60)
+        
+        # Authentic memory to trigger AI models properly
+        self.hist_rsrp = []
+        self.hist_sinr = []
+        self.serving_cell = None
+        self.time_on_cell = 0
+        self.time_since_ho = 1000
 
     def move(self, dt):
         if self.scenario == "static":
@@ -103,6 +110,30 @@ class UE:
         rsrq = round(rsrp - 10*math.log10(max(len(nb),1)+1) + random.gauss(0,2), 1)
         ta   = max(0, int(bd/78))
         nb_rsrp = compute_rsrp(haversine_m(self.lat, self.lng, nb[0]["lat"], nb[0]["lng"])) if nb else rsrp-5
+        
+        # Track history for authentic AI features
+        if self.serving_cell != best["cell_id"]:
+            self.time_since_ho = 0
+            self.time_on_cell = 0
+            self.serving_cell = best["cell_id"]
+        else:
+            self.time_since_ho += 1
+            self.time_on_cell += 1
+            
+        self.hist_rsrp.append(rsrp)
+        self.hist_sinr.append(sinr)
+        if len(self.hist_rsrp) > 25:
+            self.hist_rsrp.pop(0)
+            self.hist_sinr.pop(0)
+            
+        def get_lag(arr, n): return arr[-n-1] if len(arr) > n else arr[0]
+        
+        rsrp_lag_1 = get_lag(self.hist_rsrp, 1)
+        rsrp_delta_3 = rsrp - get_lag(self.hist_rsrp, 3)
+        sinr_delta_3 = sinr - get_lag(self.hist_sinr, 3)
+        sinr_delta_5 = sinr - get_lag(self.hist_sinr, 5)
+        rsrp_rolling5 = sum(self.hist_rsrp[-5:]) / min(5, len(self.hist_rsrp))
+        
         api_payload = {
             "physical_cellid": best["cell_id"],
             "rsrp": rsrp, "rsrq": rsrq, "sinr": sinr,
@@ -110,6 +141,17 @@ class UE:
             "num_neighbors": len(nb),
             "delta_rsrp": round(nb_rsrp - rsrp, 2),
             "best_neighbor_rsrp": nb_rsrp,
+            
+            # Engineered Features for DSO1 / DSO4 authentic triggering
+            "rsrp_lag_1": rsrp_lag_1,
+            "rsrp_delta_3": round(rsrp_delta_3, 2),
+            "sinr_delta_3": round(sinr_delta_3, 2),
+            "sinr_delta_5": round(sinr_delta_5, 2),
+            "rsrp_vs_rolling": round(rsrp - rsrp_rolling5, 2),
+            "time_since_last_ho": self.time_since_ho,
+            "serving_cell_age": self.time_on_cell,
+            "hour_of_day": 14.0, # Peak hour
+            
             # UE metadata — logged by elk_logger into inputs
             "master_id": self.uid,
             "scenario": self.scenario,

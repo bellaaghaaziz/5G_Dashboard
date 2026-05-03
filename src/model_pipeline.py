@@ -447,12 +447,9 @@ def predict_single(inputs: dict, artifacts: dict) -> dict:
     ho_prob = float(cal_model.predict_proba(X4)[0][1])
     ho_thresh = artifacts.get("threshold_dso4", 0.5)
 
-    if stage1_decision == "STAY":
-        handover = False
-        decision_source = "stage1_gate"
-    else:
-        handover = ho_prob >= ho_thresh
-        decision_source = "calibrated_controller"
+    handover = ho_prob >= ho_thresh
+    decision_source = "calibrated_controller"
+
 
     latency = round((time.perf_counter() - t0) * 1000, 2)
 

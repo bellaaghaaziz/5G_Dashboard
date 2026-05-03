@@ -39,7 +39,7 @@ export function ScientistPage() {
   const [drift, setDrift] = useState<any>(null);
   const [trainStatus, setTrainStatus] = useState<any>(null);
   const [retraining, setRetraining] = useState(false);
-  const trainPollRef = useRef<ReturnType<typeof setInterval>>();
+  const trainPollRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   useEffect(() => {
     api.get("/scientist/metrics").then(r => setMetrics(r.data)).catch(() => {});

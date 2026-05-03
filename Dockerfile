@@ -25,7 +25,7 @@ COPY --chown=appuser:appuser app.py             ./
 COPY --chown=appuser:appuser main.py            ./
 COPY --chown=appuser:appuser train_mlflow.py    ./
 COPY --chown=appuser:appuser elk_logger.py      ./
-COPY --chown=appuser:appuser test_models.py     ./
+# COPY --chown=appuser:appuser test_models.py     ./
 COPY --chown=appuser:appuser entrypoint.sh      ./
 
 # ── v9 Model artifacts ──────────────────────────────────────────────────────

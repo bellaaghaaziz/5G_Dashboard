@@ -2,13 +2,12 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Circle,
   CircleMarker,
   MapContainer,
   TileLayer,
   Tooltip,
-  Popup,
   useMap,
+  Polyline,
 } from "react-leaflet";
 import { api } from "../api/client";
 
@@ -20,10 +19,10 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
 });
 
-// Ruhr region bounding box (where dataset was collected)
+// Ruhr region bounding box
 const RUHR_CENTER: [number, number] = [51.513, 7.465];
 
-// Named areas in the dataset region
+// Named areas
 const AREAS = [
   { name: "Bochum", lat: 51.482, lng: 7.216 },
   { name: "Herne", lat: 51.537, lng: 7.225 },
@@ -32,28 +31,20 @@ const AREAS = [
   { name: "Castrop-Rauxel", lat: 51.553, lng: 7.317 },
 ];
 
-function riskColor(r: number): string {
-  if (r >= 0.7) return "#ef4444";
-  if (r >= 0.4) return "#f59e0b";
-  return "#22c55e";
-}
-function riskLabel(r: number): string {
-  if (r >= 0.7) return "High Risk";
-  if (r >= 0.4) return "Medium";
-  return "Healthy";
-}
-function scenarioEmoji(s: string): string {
-  if (s === "hbahn") return "🚋";
-  if (s === "mobile") return "📱";
-  if (s === "static") return "🏢";
-  return "📡";
+const SCENARIO_CONFIG: Record<string, { emoji: string; label: string; color: string }> = {
+  hbahn:  { emoji: "🚋", label: "H-Bahn Train",   color: "#8b5cf6" },
+  mobile: { emoji: "📱", label: "Mobile Phone",    color: "#3b82f6" },
+  static: { emoji: "🏢", label: "Static Device",   color: "#06b6d4" },
+};
+
+function getScenario(s: string) {
+  return SCENARIO_CONFIG[s] || { emoji: "📡", label: s || "Unknown", color: "#64748b" };
 }
 
-// Fallback: deterministic position within Ruhr if no GPS found
-function fallbackLatLng(cellId: number): [number, number] {
-  const lat = 51.45 + (((cellId * 1234567) >>> 0) % 1000) / 1000 * 0.12;
-  const lng = 7.20 + (((cellId * 7654321) >>> 0) % 1000) / 1000 * 0.35;
-  return [lat, lng];
+function riskColor(r: number): string {
+  if (r >= 0.55) return "#ef4444";
+  if (r >= 0.4) return "#f59e0b";
+  return "#22c55e";
 }
 
 type MapEvent = {
@@ -75,15 +66,6 @@ type MapEvent = {
 
 type GpsLookup = Record<string, { lat: number; lng: number; scenario: string }>;
 
-type CellData = {
-  cellId: number;
-  latLng: [number, number];
-  events: MapEvent[];
-  avgRisk: number;
-  hoCount: number;
-  hasRealGps: boolean;
-};
-
 function FitRuhr() {
   const map = useMap();
   useEffect(() => {
@@ -95,19 +77,13 @@ function FitRuhr() {
 export function TunisiaMap() {
   const [events, setEvents] = useState<MapEvent[]>([]);
   const [gpsLookup, setGpsLookup] = useState<GpsLookup>({});
-  const [selectedCell, setSelectedCell] = useState<CellData | null>(null);
-  const [filter, setFilter] = useState<"all" | "risk" | "ho">("all");
+  const [selectedUE, setSelectedUE] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
-  const [realGpsCount, setRealGpsCount] = useState(0);
-  const pollRef = useRef<ReturnType<typeof setInterval>>();
+  const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
-  // Load GPS lookup once
   useEffect(() => {
     api.get("/operator/cell-gps")
-      .then(({ data }) => {
-        setGpsLookup(data);
-        setRealGpsCount(Object.keys(data).length);
-      })
+      .then(({ data }) => setGpsLookup(data))
       .catch(() => {});
   }, []);
 
@@ -121,110 +97,92 @@ export function TunisiaMap() {
 
   useEffect(() => {
     fetchEvents();
-    pollRef.current = setInterval(fetchEvents, 3000);
+    pollRef.current = setInterval(fetchEvents, 1000);
     return () => clearInterval(pollRef.current);
   }, [fetchEvents]);
 
-  // Group by cell with real GPS
-  const cells: CellData[] = useMemo(() => {
-    const map = new Map<number, MapEvent[]>();
-    events.forEach(e => {
-      if (!map.has(e.cell_id)) map.set(e.cell_id, []);
-      map.get(e.cell_id)!.push(e);
-    });
-    return Array.from(map.entries()).map(([cellId, evs]) => {
-      const avgRisk = evs.reduce((s, e) => s + e.risk, 0) / evs.length;
-      const gps = gpsLookup[String(cellId)];
-      const hasRealGps = !!gps;
-      const latLng: [number, number] = gps
-        ? [gps.lat, gps.lng]
-        : fallbackLatLng(cellId);
-      return { cellId, latLng, events: evs, avgRisk, hoCount: evs.filter(e => e.recommended).length, hasRealGps };
-    });
-  }, [events, gpsLookup]);
-
-  const displayedCells = useMemo(() => {
-    if (filter === "risk") return cells.filter(c => c.avgRisk >= 0.7);
-    if (filter === "ho") return cells.filter(c => c.hoCount > 0);
-    return cells;
-  }, [cells, filter]);
-
-  const totalHO = cells.reduce((s, c) => s + c.hoCount, 0);
-  const highRisk = cells.filter(c => c.avgRisk >= 0.7).length;
-  const realGpsCells = cells.filter(c => c.hasRealGps).length;
-
-  // Deduplicate: latest entry per UE_ID (for individual UE markers)
+  // Derived data
   const latestPerUE = useMemo(() => {
     const m = new Map<string, MapEvent>();
     events.forEach(e => { m.set(e.ue_id, e); });
     return Array.from(m.values());
   }, [events]);
 
-  const totalUEs = latestPerUE.length;
-  const activeUEs = latestPerUE.filter(e => e.ue_lat && e.ue_lng).length;
+  const selectedHistory = useMemo(() => {
+    if (!selectedUE) return [];
+    
+    // Sort chronological
+    const sorted = events
+      .filter(e => e.ue_id === selectedUE)
+      .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+    
+    // Find handover events (where cell_id changes)
+    const hoEvents = [];
+    let prevCell = -1;
+    let baselineRsrp = -140;
+
+    for (let i = 0; i < sorted.length; i++) {
+      const e = sorted[i];
+      if (e.cell_id !== prevCell) {
+        if (prevCell !== -1) {
+          // Calculate gain: current RSRP minus what it was before handover
+          const gain = e.rsrp - baselineRsrp;
+          hoEvents.push({
+            ...e,
+            prevCell,
+            gain,
+            isAi: e.recommended
+          });
+        }
+        prevCell = e.cell_id;
+      }
+      baselineRsrp = e.rsrp; // keep track of the signal before it changes
+    }
+    return hoEvents.reverse(); // newest first
+  }, [events, selectedUE]);
+
+  const activeCells = useMemo(() => {
+    const map = new Map<number, { lat: number, lng: number }>();
+    latestPerUE.forEach(e => {
+      const gps = gpsLookup[String(e.cell_id)];
+      if (gps) map.set(e.cell_id, { lat: gps.lat, lng: gps.lng });
+    });
+    return map;
+  }, [latestPerUE, gpsLookup]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 12 }}>
+      <style>{`
+        @keyframes fadeSignal {
+          0% { opacity: 1; }
+          50% { opacity: 0.2; }
+          100% { opacity: 1; }
+        }
+        .ue-fade {
+          animation: fadeSignal 2s ease-in-out infinite;
+        }
+      `}</style>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <div style={{ fontSize: 22, fontWeight: 900, color: "#f1f5f9", letterSpacing: -0.5 }}>Live Network Map — Ruhr Region, Germany 🇩🇪</div>
+          <div style={{ fontSize: 22, fontWeight: 900, color: "#f1f5f9", letterSpacing: -0.5 }}>
+            Live Network Map — Ruhr Region, Germany 🇩🇪
+          </div>
           <div style={{ fontSize: 13, color: "#475569", marginTop: 2 }}>
-            {totalUEs} concurrent UEs · {cells.length} active cells · {realGpsCells} real GPS · Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            {latestPerUE.length} active UEs · {activeCells.size} serving cells · Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
           </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {(["all", "risk", "ho"] as const).map(f => (
-            <button key={f} onClick={() => setFilter(f)} style={{
-              padding: "7px 18px", borderRadius: 100, border: "none", cursor: "pointer",
-              fontWeight: 700, fontSize: 13, fontFamily: "inherit",
-              background: filter === f ? (f === "risk" ? "#ef4444" : f === "ho" ? "#f59e0b" : "#22d3ee") : "rgba(255,255,255,0.06)",
-              color: filter === f ? "#fff" : "#64748b", transition: "all 0.2s",
-            }}>
-              {f === "all" ? "🗺 All Cells" : f === "risk" ? "🔴 High Risk" : "⚡ HO Alerts"}
-            </button>
-          ))}
         </div>
       </div>
 
-      {/* KPI strip */}
-      <div style={{ display: "flex", gap: 12 }}>
-        {[
-          { l: "Concurrent UEs", v: totalUEs, color: "#22d3ee", icon: "📱" },
-          { l: "Active Cells", v: cells.length, color: "#a855f7", icon: "🗼" },
-          { l: "HO Recommended", v: totalHO, color: "#f59e0b", icon: "⚡" },
-          { l: "High Risk Cells", v: highRisk, color: "#ef4444", icon: "🔴" },
-          { l: "Real GPS UEs", v: activeUEs, color: "#22c55e", icon: "📍" },
-        ].map(k => (
-          <div key={k.l} style={{
-            flex: 1, padding: "12px 14px", borderRadius: 14,
-            background: "rgba(13,27,46,0.8)", border: `1px solid ${k.color}22`,
-            display: "flex", alignItems: "center", gap: 10,
-          }}>
-            <span style={{ fontSize: 20 }}>{k.icon}</span>
-            <div>
-              <div style={{ fontSize: 22, fontWeight: 900, color: k.color, lineHeight: 1 }}>{k.v}</div>
-              <div style={{ fontSize: 10, color: "#475569", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginTop: 2 }}>{k.l}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Map + sidebar */}
+      {/* Map + Sidebar */}
       <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 400 }}>
-        {/* Map */}
+        
+        {/* MAP PANEL */}
         <div style={{ flex: 1, borderRadius: 16, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)", position: "relative" }}>
-          <MapContainer
-            center={RUHR_CENTER}
-            zoom={12}
-            style={{ width: "100%", height: "100%", background: "#0d1b2e" }}
-            zoomControl={true}
-            attributionControl={false}
-          >
+          <MapContainer center={RUHR_CENTER} zoom={12} style={{ width: "100%", height: "100%", background: "#0d1b2e" }} zoomControl={true} attributionControl={false}>
             <FitRuhr />
             <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
 
-            {/* Area labels */}
             {AREAS.map(a => (
               <CircleMarker key={a.name} center={[a.lat, a.lng]} radius={2} pathOptions={{ color: "#1e3a5f", fillColor: "#334155", fillOpacity: 0.6, weight: 0 }}>
                 <Tooltip permanent direction="top" offset={[0, -4]}>
@@ -233,169 +191,165 @@ export function TunisiaMap() {
               </CircleMarker>
             ))}
 
-            {/* Coverage zones */}
-            {displayedCells.map(cell => (
-              <Circle key={`zone-${cell.cellId}`} center={cell.latLng} radius={800}
-                pathOptions={{
-                  color: riskColor(cell.avgRisk),
-                  fillColor: riskColor(cell.avgRisk),
-                  fillOpacity: cell.avgRisk >= 0.7 ? 0.20 : cell.avgRisk >= 0.4 ? 0.12 : 0.07,
-                  weight: cell.avgRisk >= 0.7 ? 1.5 : 0.5,
-                  dashArray: cell.hoCount > 0 ? "6,3" : undefined,
-                }} />
-            ))}
-
-            {/* Cell tower markers */}
-            {displayedCells.map(cell => (
-              <CircleMarker key={`cell-${cell.cellId}`} center={cell.latLng}
-                radius={cell.avgRisk >= 0.7 ? 13 : cell.avgRisk >= 0.4 ? 10 : 8}
-                pathOptions={{ color: riskColor(cell.avgRisk), fillColor: riskColor(cell.avgRisk), fillOpacity: 0.9, weight: 2 }}
-                eventHandlers={{ click: () => setSelectedCell(cell) }}>
-                <Tooltip direction="top" offset={[0, -10]}>
-                  <div style={{ fontFamily: "Inter, sans-serif", padding: "2px 4px" }}>
-                    <div style={{ fontWeight: 800, fontSize: 13 }}>Cell {cell.cellId} {cell.hasRealGps ? "📍" : "〰️"}</div>
-                    <div style={{ color: riskColor(cell.avgRisk), fontWeight: 700 }}>{riskLabel(cell.avgRisk)} · {(cell.avgRisk * 100).toFixed(0)}%</div>
-                    <div style={{ color: "#64748b", fontSize: 11 }}>{cell.events.length} UEs · {cell.hoCount} HO alerts</div>
-                    {cell.hasRealGps && <div style={{ color: "#22c55e", fontSize: 10 }}>✓ Real GPS from dataset</div>}
-                  </div>
-                </Tooltip>
-                <Popup>
-                  <div style={{ fontFamily: "Inter, sans-serif", minWidth: 190 }}>
-                    <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 2 }}>📡 Cell {cell.cellId}</div>
-                    {cell.hasRealGps
-                      ? <div style={{ fontSize: 11, color: "#22c55e", marginBottom: 6 }}>✓ Real GPS — {cell.latLng[0].toFixed(4)}°N, {cell.latLng[1].toFixed(4)}°E</div>
-                      : <div style={{ fontSize: 11, color: "#f59e0b", marginBottom: 6 }}>Estimated position (no GPS in dataset)</div>}
-                    <hr style={{ border: "1px solid #e2e8f0", margin: "6px 0" }} />
-                    <div><b>Avg Risk:</b> {(cell.avgRisk * 100).toFixed(1)}%</div>
-                    <div><b>UEs:</b> {cell.events.length}</div>
-                    <div><b>HO Recs:</b> {cell.hoCount}</div>
-                    <div style={{ marginTop: 8 }}>
-                      {cell.events.slice(0, 4).map(e => (
-                        <div key={e.id} style={{ fontSize: 11, display: "flex", gap: 6, marginBottom: 2 }}>
-                          <span>{scenarioEmoji(e.scenario)}</span>
-                          <span style={{ color: riskColor(e.risk) }}>{(e.risk * 100).toFixed(0)}%</span>
-                          <span style={{ color: "#64748b" }}>{e.rsrp}dBm SINR:{e.sinr}</span>
-                          {e.recommended && <span style={{ color: "#ef4444", fontWeight: 700 }}>⚡HO</span>}
-                        </div>
-                      ))}
-                      {cell.events.length > 4 && <div style={{ fontSize: 10, color: "#94a3b8" }}>+{cell.events.length - 4} more</div>}
-                    </div>
-                  </div>
-                </Popup>
-              </CircleMarker>
-            ))}
-
-            {/* UE dots — at their real GPS position if available, else orbit cell */}
+            {/* ONLY draw lines and markers for UEs. No big cell tower circles. */}
             {latestPerUE.map((e) => {
-              const hasPos = e.ue_lat != null && e.ue_lng != null;
-              let lat: number, lng: number;
-              if (hasPos) {
-                lat = e.ue_lat!;
-                lng = e.ue_lng!;
-              } else {
-                // fallback: orbit the serving cell
-                const cell = cells.find(c => c.cellId === e.cell_id);
-                if (!cell) return null;
-                lat = cell.latLng[0] + (Math.random() - 0.5) * 0.003;
-                lng = cell.latLng[1] + (Math.random() - 0.5) * 0.003;
-              }
+              if (e.ue_lat == null || e.ue_lng == null) return null;
+              const cellPos = activeCells.get(e.cell_id);
+              if (!cellPos) return null;
+              
+              const sc = getScenario(e.scenario);
+              const isSelected = selectedUE === e.ue_id;
+              
+              // Dim others if one is selected
+              const opacity = selectedUE && !isSelected ? 0.2 : 1;
+
               return (
-                <CircleMarker key={e.ue_id}
-                  center={[lat, lng]}
-                  radius={e.recommended ? 6 : 4}
-                  pathOptions={{
-                    color: e.recommended ? "#ef4444" : riskColor(e.risk),
-                    fillColor: riskColor(e.risk),
-                    fillOpacity: 0.95,
-                    weight: e.recommended ? 2.5 : 1.5,
-                  }}>
-                  <Tooltip direction="top">
-                    <div style={{ fontFamily: "Inter, sans-serif", fontSize: 11 }}>
-                      {scenarioEmoji(e.scenario)} <b>{e.ue_id}</b><br />
-                      Risk: {(e.risk * 100).toFixed(0)}% · RSRP: {e.rsrp}dBm · SINR: {e.sinr}<br />
-                      Velocity: {e.velocity.toFixed(0)} km/h · Cell: {e.cell_id}
-                      {e.recommended && <><br /><b style={{ color: "#ef4444" }}>⚡ Handover Recommended</b></>}
-                    </div>
-                  </Tooltip>
-                </CircleMarker>
+                <div key={`render-${e.ue_id}`}>
+                  {/* UE Marker */}
+                  <CircleMarker
+                    center={[e.ue_lat, e.ue_lng]}
+                    radius={isSelected ? 14 : 10}
+                    pathOptions={{
+                      className: "ue-fade",
+                      color: e.recommended ? "#ef4444" : "#ffffff",
+                      fillColor: sc.color,
+                      fillOpacity: opacity,
+                      weight: 3,
+                      opacity: opacity
+                    }}
+                    eventHandlers={{ click: () => setSelectedUE(isSelected ? null : e.ue_id) }}>
+                    <Tooltip permanent direction="bottom" offset={[0, 12]}>
+                      <div style={{ fontFamily: "Inter, sans-serif", textAlign: "center", background: "rgba(15,23,42,0.95)", padding: "4px 8px", borderRadius: 8, border: `2px solid ${sc.color}`, opacity }}>
+                        <div style={{ fontSize: 14, lineHeight: 1 }}>{sc.emoji}</div>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: sc.color, whiteSpace: "nowrap" }}>{sc.label}</div>
+                        <div style={{ fontSize: 9, color: "#94a3b8" }}>Cell {e.cell_id}</div>
+                      </div>
+                    </Tooltip>
+                  </CircleMarker>
+                </div>
               );
             })}
           </MapContainer>
-
-          {/* Legend */}
-          <div style={{ position: "absolute", bottom: 16, left: 16, zIndex: 1000, background: "rgba(5,13,26,0.92)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 7 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#334155", textTransform: "uppercase", letterSpacing: 1 }}>Legend</div>
-            {[
-              { c: "#22c55e", l: "Healthy (< 40% risk)" },
-              { c: "#f59e0b", l: "Medium (40-70%)" },
-              { c: "#ef4444", l: "High risk (> 70%)" },
-              { c: "#22c55e", l: "📍 = Real GPS from dataset" },
-            ].map(lg => (
-              <div key={lg.l} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: lg.c, flexShrink: 0 }} />
-                <span style={{ fontSize: 11, color: "#64748b" }}>{lg.l}</span>
-              </div>
-            ))}
-          </div>
         </div>
 
-        {/* Cell list sidebar */}
-        <div style={{ width: 250, display: "flex", flexDirection: "column", gap: 8, overflowY: "auto", maxHeight: "100%" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#334155", textTransform: "uppercase", letterSpacing: 1.5 }}>Active Cells ({displayedCells.length})</div>
-          {[...displayedCells].sort((a, b) => b.avgRisk - a.avgRisk).map(cell => (
-            <div key={cell.cellId} onClick={() => setSelectedCell(selectedCell?.cellId === cell.cellId ? null : cell)} style={{
-              padding: "11px 13px", borderRadius: 12, cursor: "pointer",
-              background: selectedCell?.cellId === cell.cellId ? `${riskColor(cell.avgRisk)}18` : "rgba(13,27,46,0.7)",
-              border: `1px solid ${selectedCell?.cellId === cell.cellId ? riskColor(cell.avgRisk) + "44" : "rgba(255,255,255,0.06)"}`,
-              transition: "all 0.2s",
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-                <div style={{ fontWeight: 700, fontSize: 12, color: "#e2e8f0" }}>
-                  Cell {cell.cellId} {cell.hasRealGps ? "📍" : ""}
+        {/* SIDEBAR */}
+        <div style={{ width: 340, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+          
+          {selectedUE ? (
+            // ================= HANDOVER HISTORY VIEW =================
+            <div style={{ background: "rgba(13,27,46,0.8)", borderRadius: 16, border: "1px solid rgba(255,255,255,0.06)", height: "100%", display: "flex", flexDirection: "column" }}>
+              {/* Header */}
+              <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 4 }}>Handover History</div>
+                  <div style={{ fontSize: 16, fontWeight: 900, color: "#f1f5f9" }}>{selectedUE}</div>
                 </div>
-                <div style={{ padding: "2px 7px", borderRadius: 100, fontSize: 10, fontWeight: 800, background: `${riskColor(cell.avgRisk)}20`, color: riskColor(cell.avgRisk) }}>
-                  {riskLabel(cell.avgRisk)}
-                </div>
+                <button onClick={() => setSelectedUE(null)} style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", width: 28, height: 28, borderRadius: "50%", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  ✕
+                </button>
               </div>
-              <div style={{ height: 3, borderRadius: 3, background: "rgba(255,255,255,0.06)", marginBottom: 5 }}>
-                <div style={{ height: "100%", borderRadius: 3, width: `${cell.avgRisk * 100}%`, background: riskColor(cell.avgRisk), transition: "width 0.5s" }} />
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#334155" }}>
-                <span>{cell.events.length} UEs</span>
-                {cell.hoCount > 0 && <span style={{ color: "#f59e0b", fontWeight: 700 }}>⚡{cell.hoCount}</span>}
-                <span style={{ color: riskColor(cell.avgRisk) }}>{(cell.avgRisk * 100).toFixed(0)}%</span>
+
+              {/* Timeline */}
+              <div style={{ padding: 20, flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
+                {selectedHistory.length === 0 ? (
+                  <div style={{ textAlign: "center", color: "#64748b", fontSize: 13, marginTop: 40 }}>
+                    Tracking trip...<br/>Waiting for first handover.
+                  </div>
+                ) : (
+                  selectedHistory.map((ho, idx) => (
+                    <div key={`${ho.timestamp}-${idx}`} style={{ position: "relative", paddingLeft: 24 }}>
+                      {/* Timeline dot */}
+                      <div style={{ position: "absolute", left: 0, top: 4, width: 10, height: 10, borderRadius: "50%", background: ho.isAi ? "#22c55e" : "#f59e0b", border: "2px solid #0d1b2e" }} />
+                      {/* Timeline line */}
+                      {idx !== selectedHistory.length - 1 && (
+                        <div style={{ position: "absolute", left: 4, top: 14, bottom: -16, width: 2, background: "rgba(255,255,255,0.06)" }} />
+                      )}
+                      
+                      <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>
+                        {new Date(ho.timestamp || "").toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                      </div>
+                      
+                      <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 12, padding: 12, border: `1px solid ${ho.isAi ? "rgba(34,197,94,0.3)" : "rgba(245,158,11,0.3)"}` }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                          <div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 800, color: "#e2e8f0" }}>
+                              Cell {ho.prevCell} <span style={{ color: "#64748b" }}>→</span> Cell {ho.cell_id}
+                            </div>
+                            <div style={{ fontSize: 11, color: ho.isAi ? "#22c55e" : "#f59e0b", fontWeight: 700, marginTop: 2 }}>
+                              {ho.isAi ? "⚡ Predictive AI Handover" : "⏳ Legacy Reactive Handover"}
+                            </div>
+                          </div>
+                          
+                          {/* Gain Badge */}
+                          <div style={{ background: ho.gain > 0 ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)", color: ho.gain > 0 ? "#22c55e" : "#ef4444", padding: "4px 8px", borderRadius: 8, fontSize: 12, fontWeight: 800 }}>
+                            {ho.gain > 0 ? "+" : ""}{ho.gain.toFixed(1)} dBm Gain
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", gap: 16, fontSize: 11 }}>
+                          <div>
+                            <span style={{ color: "#64748b" }}>New Signal:</span> <span style={{ color: "#f1f5f9", fontWeight: 700 }}>{ho.rsrp} dBm</span>
+                          </div>
+                          <div>
+                            <span style={{ color: "#64748b" }}>AI Risk Avoided:</span> <span style={{ color: "#f1f5f9", fontWeight: 700 }}>{(ho.dso1_risk * 100).toFixed(0)}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
-          ))}
-          {displayedCells.length === 0 && <div style={{ padding: "32px 16px", textAlign: "center", color: "#334155", fontSize: 13 }}>Waiting for simulator data...</div>}
+          ) : (
+            // ================= ALL UEs VIEW =================
+            <>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 1.5 }}>
+                Active Trips ({latestPerUE.length})
+              </div>
+              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4 }}>
+                Click any user to view their Handover History.
+              </div>
+              
+              {latestPerUE.map(e => {
+                const sc = getScenario(e.scenario);
+                return (
+                  <div key={e.ue_id}
+                    onClick={() => setSelectedUE(e.ue_id)}
+                    style={{
+                      padding: "14px 16px", borderRadius: 14, cursor: "pointer",
+                      background: "rgba(13,27,46,0.8)", border: "1px solid rgba(255,255,255,0.06)",
+                      transition: "all 0.2s",
+                    }}
+                    onMouseEnter={(ev) => ev.currentTarget.style.borderColor = sc.color}
+                    onMouseLeave={(ev) => ev.currentTarget.style.borderColor = "rgba(255,255,255,0.06)"}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                      <div style={{ width: 40, height: 40, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", background: `${sc.color}20`, fontSize: 22 }}>
+                        {sc.emoji}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 800, fontSize: 13, color: "#f1f5f9" }}>{sc.label}</div>
+                        <div style={{ fontSize: 10, color: "#64748b", fontFamily: "monospace" }}>{e.ue_id}</div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", background: "rgba(255,255,255,0.03)", padding: "8px 12px", borderRadius: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 9, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5 }}>Serving Cell</div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: "#e2e8f0" }}>{e.cell_id}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 9, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5 }}>RSRP</div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: e.rsrp > -95 ? "#22c55e" : "#ef4444" }}>{e.rsrp} dBm</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
       </div>
-
-      {/* Cell detail panel */}
-      {selectedCell && (
-        <div style={{ padding: "18px 22px", borderRadius: 16, background: "rgba(13,27,46,0.9)", border: `1px solid ${riskColor(selectedCell.avgRisk)}33`, backdropFilter: "blur(12px)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div>
-              <span style={{ fontWeight: 800, fontSize: 16, color: "#e2e8f0" }}>📡 Cell {selectedCell.cellId}</span>
-              {selectedCell.hasRealGps && <span style={{ marginLeft: 10, fontSize: 12, color: "#22c55e" }}>📍 {selectedCell.latLng[0].toFixed(4)}°N, {selectedCell.latLng[1].toFixed(4)}°E (real GPS)</span>}
-            </div>
-            <button onClick={() => setSelectedCell(null)} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 16, fontFamily: "inherit" }}>✕</button>
-          </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {selectedCell.events.map(e => (
-              <div key={e.id} style={{ padding: "10px 13px", borderRadius: 10, minWidth: 150, background: "rgba(255,255,255,0.03)", border: `1px solid ${riskColor(e.risk)}22` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8" }}>{scenarioEmoji(e.scenario)} {e.ue_id.slice(-10)}</span>
-                  {e.recommended && <span style={{ fontSize: 10, color: "#ef4444", fontWeight: 800 }}>⚡HO</span>}
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 800, color: riskColor(e.risk) }}>{(e.risk * 100).toFixed(1)}%</div>
-                <div style={{ fontSize: 11, color: "#475569" }}>RSRP: {e.rsrp}dBm · SINR: {e.sinr}</div>
-                <div style={{ fontSize: 10, color: "#334155" }}>{e.cluster_label?.slice(0, 30)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

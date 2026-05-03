@@ -265,10 +265,9 @@ export function LandingPage() {
       <section style={{ padding: "80px 48px", background: "rgba(255,255,255,0.01)", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
         <div style={{ maxWidth: 900, margin: "0 auto", textAlign: "center" }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#22d3ee", letterSpacing: 3, textTransform: "uppercase", marginBottom: 16 }}>Team</div>
-          <h2 style={{ fontSize: 38, fontWeight: 900, letterSpacing: -1, marginBottom: 48 }}>The People Behind CellPilot</h2>
+          <h2 style={{ fontSize: 38, fontWeight: 900, letterSpacing: -1, marginBottom: 48 }}>The Best Team Group</h2>
           <div style={{ display: "flex", gap: 32, justifyContent: "center", flexWrap: "wrap" }}>
             {[
-              { name: "Aziz Bella Agha", role: "ML Engineer & Platform Architect", avatar: "AB", color: "#22d3ee" },
               { name: "Research Advisor", role: "5G Networks & AI Systems", avatar: "RA", color: "#a855f7" },
             ].map(p => (
               <div key={p.name} style={{ padding: "32px", borderRadius: 20, background: "rgba(15,23,42,0.6)", border: "1px solid rgba(255,255,255,0.06)", textAlign: "center", minWidth: 220 }}>
@@ -294,7 +293,7 @@ export function LandingPage() {
           <p style={{ color: "#64748b", fontSize: 17, marginBottom: 48, lineHeight: 1.7 }}>Have questions about the platform or interested in collaboration? We'd love to hear from you.</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {[
-              { l: "Email", v: "aziz.bellaagha@university.edu", icon: "✉️" },
+              { l: "Email", v: "cellpilot@gmail.com", icon: "✉️" },
               { l: "Project", v: "5G AI Handover Platform — MLOps Research", icon: "🎓" },
               { l: "GitHub", v: "github.com/bellaaghaaziz/5G_Dashboard", icon: "💻" },
             ].map(c => (

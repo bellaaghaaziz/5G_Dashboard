@@ -1,4 +1,4 @@
-# ── Python ─────────────────────────────────────────────
+# Python
 env/
 venv/
 .venv/
@@ -8,47 +8,44 @@ __pycache__/
 *.pyd
 .Python
 
-# ── Node.js ────────────────────────────────────────────
+# Node.js
 node_modules/
 dist/
 build/
 .npm/
 
-# ── Logs & Runtime ─────────────────────────────────────
+# Logs & Runtime
 logs/
 *.log
 mlflow.db
 mlruns/
 
-# ── Dataset & Large Files ──────────────────────────────
+# Dataset & Large Files
 DATASET/
 *.csv
 *.parquet
+docs/CellPilot_Demo.gif
 
-# ── Trained Models (large binary files) ───────────────
-# Uncomment below to exclude model .pkl files from git
-# (they can be regenerated with: python mlops/train.py train)
+# Trained Models
 # *.pkl
-# *.keras
-# models/
 
-# ── IDE & Editor ───────────────────────────────────────
+# IDE & Editor
 .vscode/
 .idea/
 .ipynb_checkpoints/
 *.swp
 *.swo
 
-# ── Secrets ────────────────────────────────────────────
+# Secrets
 .streamlit/secrets.toml
 .env
 .env.local
 .env.production
 
-# ── OS ─────────────────────────────────────────────────
+# OS
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# ── Metrics (regenerated on train) ─────────────────────
+# Metrics
 metrics.json

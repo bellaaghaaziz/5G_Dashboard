@@ -104,6 +104,41 @@ export class GatewayController {
     return this.gatewayService.proxyToDashboard("/operator/ue-types", "GET");
   }
 
+  @Get("operator/cell-gps")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  getCellGps() {
+    return this.gatewayService.proxyToDashboard("/operator/cell-gps", "GET");
+  }
+
+  @Get("operator/all-towers")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  getAllTowers() {
+    return this.gatewayService.proxyToDashboard("/operator/all-towers", "GET");
+  }
+
+  @Get("operator/handover-log")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  getHandoverLogs() {
+    return this.gatewayService.proxyToDashboard("/operator/handover-log", "GET");
+  }
+
+  @Get("operator/handover-history")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  getHandoverHistory() {
+    return this.gatewayService.proxyToDashboard("/operator/handover-history", "GET");
+  }
+
+  @Get("operator/dataset-handovers")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  getDatasetHandovers() {
+    return this.gatewayService.proxyToDashboard("/operator/dataset-handovers", "GET");
+  }
+
   @Get("operator/dataset-info")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("network_operator", "admin")

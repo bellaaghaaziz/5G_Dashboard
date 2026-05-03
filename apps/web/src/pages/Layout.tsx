@@ -5,6 +5,7 @@ import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import MapRoundedIcon from "@mui/icons-material/MapRounded";
 import ScienceRoundedIcon from "@mui/icons-material/ScienceRounded";
 import SignalCellularAltRoundedIcon from "@mui/icons-material/SignalCellularAltRounded";
+import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import { Avatar, Box, Chip, Divider, IconButton, Stack, Tooltip, Typography } from "@mui/material";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/auth";
@@ -28,6 +29,7 @@ export function Layout() {
       label: "Analytics",
       items: [
         { label: "Live Metrics", to: "/app/operator", icon: <AnalyticsRoundedIcon />, show: true },
+        { label: "Handover History", to: "/app/operator/handovers", icon: <HistoryRoundedIcon />, show: role === "network_operator" || role === "admin" },
       ],
     },
   ];

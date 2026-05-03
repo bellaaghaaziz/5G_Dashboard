@@ -42,9 +42,29 @@ export class DashboardController {
     return this.dashboardService.getCellGps();
   }
 
+  @Get("operator/dataset-handovers")
+  async getDatasetHandovers() {
+    return this.dashboardService.getDatasetHandovers();
+  }
+
   @Get("operator/dataset-info")
   async getDatasetInfo() {
     return this.dashboardService.getDatasetInfo();
+  }
+
+  @Get("operator/handover-log")
+  getHandoverLogs() {
+    return this.dashboardService.getHandoverLogs();
+  }
+
+  @Get("operator/handover-history")
+  getHandoverHistory() {
+    return this.dashboardService.getHandoverHistoryComparison();
+  }
+
+  @Get("operator/all-towers")
+  getAllTowers() {
+    return this.dashboardService.getAllTowers();
   }
 
   // ── Scientist ──

@@ -370,6 +370,20 @@ def dataset_slice(ts_index: int):
     }
 
 
+@app.get("/dataset/handovers", tags=["Dataset"])
+def dataset_handovers():
+    """Return actual handover counts grouped by cell from the real dataset."""
+    info = _load_dataset_info()
+    if info is None:
+        raise HTTPException(404, "Dataset not found")
+    df = info["df"]
+    ho_df = df[df["is_ho"] == 1]
+    
+    # We group by physical_cellid to get handover counts per cell
+    counts = ho_df.groupby("physical_cellid").size().to_dict()
+    return {str(int(k)): int(v) for k, v in counts.items()}
+
+
 @app.get("/dataset/ue-types", tags=["Dataset"])
 def dataset_ue_types():
     """Return distinct UE scenario types and counts."""

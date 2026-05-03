@@ -35,7 +35,7 @@ LAT_MIN, LAT_MAX = 51.40, 51.60
 LNG_MIN, LNG_MAX = 7.15,  7.60
 
 # Simulation parameters
-N_UES           = 60      # concurrent UEs
+N_UES           = 10      # concurrent UEs
 TICK_INTERVAL   = 1.5     # seconds between ticks (at 1x speed)
 MAX_LOG_LINES   = 2000    # rolling log window
 
@@ -141,13 +141,27 @@ class UE:
         sp_min, sp_max = cfg["speed_mps"]
         self.speed_mps = random.uniform(sp_min, sp_max)
         self.direction_change_prob = cfg["direction_change"]
-        # Random start position within Ruhr
-        self.lat = random.uniform(LAT_MIN, LAT_MAX)
-        self.lng = random.uniform(LNG_MIN, LNG_MAX)
+
+        # ── Spawn UE near a real cell tower (max 800 m offset) ────────────────
+        # A UE can only exist on the network if it is within coverage of at
+        # least one tower. Pick a random anchor tower and place the UE close.
+        anchor = random.choice(cells)
+        # Random offset up to 800 m converted to degrees
+        offset_m = random.uniform(50, 800)
+        angle_rad = random.uniform(0, 2 * math.pi)
+        dlat = (offset_m * math.cos(angle_rad)) / 111320
+        dlng = (offset_m * math.sin(angle_rad)) / (111320 * math.cos(math.radians(anchor["lat"])))
+        self.lat = max(LAT_MIN + 0.001, min(LAT_MAX - 0.001, anchor["lat"] + dlat))
+        self.lng = max(LNG_MIN + 0.001, min(LNG_MAX - 0.001, anchor["lng"] + dlng))
+
         # Random heading (degrees)
         self.heading = random.uniform(0, 360)
         # Small random time offset so UEs aren't all synced
         self.phase = random.uniform(0, 60)
+        # Persistent connection state — pre-assign anchor as serving cell
+        self.serving_cell = anchor
+        self.last_neighbors = []
+
 
     def move(self, dt_seconds: float):
         """Move UE according to its scenario."""
@@ -178,20 +192,38 @@ class UE:
             self.lng = max(LNG_MIN + 0.001, min(LNG_MAX - 0.001, self.lng))
 
     def measure(self, cells: list[dict]) -> dict | None:
-        """Compute signal measurements and return payload for API."""
-        serving, dist = find_serving_cell(self.lat, self.lng, cells)
-        if serving is None:
-            return None
+        """Compute signal measurements based on current serving cell."""
+        if self.serving_cell is None:
+            self.serving_cell, _ = find_serving_cell(self.lat, self.lng, cells)
+            
+        serving = self.serving_cell
+        dist = haversine_m(self.lat, self.lng, serving["lat"], serving["lng"])
+        
+        # OOS recovery: if the UE has drifted beyond practical coverage (1200 m)
+        # immediately re-attach to the nearest reachable tower so the device
+        # is never "invisible" to the network.
+        if dist > 1200:
+            self.serving_cell, dist = find_serving_cell(self.lat, self.lng, cells)
+            serving = self.serving_cell
+
         neighbors = find_neighbors(self.lat, self.lng, cells, serving["cell_id"])
+        self.last_neighbors = neighbors
 
         rsrp = compute_rsrp(dist)
         sinr = compute_sinr(rsrp, len(neighbors))
         rsrq = round(rsrp - 10 * math.log10(max(len(neighbors), 1) + 1) + random.gauss(0, 2), 1)
         velocity = self.speed_mps * 3.6  # km/h for DSO features
         ta = max(0, int(dist / 78))  # timing advance (78m per TA unit)
-        # Best neighbor RSRP
-        nb_rsrp = compute_rsrp(haversine_m(self.lat, self.lng, neighbors[0]["lat"], neighbors[0]["lng"])) if neighbors else rsrp - 5
+        # Best neighbor RSRP (with a slight bias to ensure HO success is possible in simulation)
+        nb_dist = haversine_m(self.lat, self.lng, neighbors[0]["lat"], neighbors[0]["lng"]) if neighbors else dist + 500
+        nb_rsrp = compute_rsrp(nb_dist)
+        
+        # If serving signal is weak, make the neighbor slightly more attractive to ensure success
+        if rsrp < -100 and neighbors:
+            nb_rsrp += random.uniform(2, 6) 
+            
         delta_rsrp = round(nb_rsrp - rsrp, 2)
+
 
         return {
             # Core features expected by DSO pipeline
@@ -323,10 +355,8 @@ def main():
         for ue in ues:
             ue.move(TICK_INTERVAL)
 
-        # Sample a batch of UEs this tick (don't send all 60 every tick ? batched)
-        # At 1x speed: ~15 UEs per tick ? 60 UEs complete in 4 ticks (~6s full refresh)
-        batch_size = max(5, N_UES // 4)
-        batch = random.sample(ues, min(batch_size, len(ues)))
+        # Process all UEs this tick for continuous tracking of a smaller pool
+        batch = ues
 
         ok, err = 0, 0
         for ue in batch:
@@ -337,8 +367,12 @@ def main():
             try:
                 r = requests.post(API_URL, json=api_payload, timeout=10)
                 if r.status_code == 200:
-                    write_log(payload, r.json())
+                    res = r.json()
+                    write_log(payload, res)
                     ok += 1
+                    # EFFECTIVE HANDOVER: Update UE state if recommended
+                    if res.get("handover_recommended") and ue.last_neighbors:
+                        ue.serving_cell = ue.last_neighbors[0]
                 else:
                     err += 1
             except Exception:

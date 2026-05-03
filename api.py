@@ -148,8 +148,8 @@ class TelemetryInput(BaseModel):
     neighbor_diversity: float = Field(0.5, description="Neighbour RSRP diversity")
 
     # DSO2 outputs (pre-computed or defaults)
-    dso2_target_rsrp: float = Field(-90.0, description="DSO2 predicted target RSRP")
-    dso2_num_candidates: float = Field(1.0, description="DSO2 viable candidate count")
+    dso2_target_rsrp: float = Field(-140.0, description="DSO2 predicted target RSRP")
+    dso2_num_candidates: float = Field(0.0, description="DSO2 viable candidate count")
 
     # Optional
     is_ho: float = Field(0.0)
@@ -166,6 +166,7 @@ class TelemetryInput(BaseModel):
     delta_rsrp: float = Field(0.0, description="RSRP delta to best neighbor")
 
     class Config:
+        extra = "allow"
         json_schema_extra = {
             "example": {
                 "rsrp": -95, "rsrq": -12, "sinr": 10, "cqi": 9,

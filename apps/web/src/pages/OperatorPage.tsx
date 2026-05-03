@@ -9,13 +9,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { TunisiaMap } from "../components/TunisiaMap";
 import { api } from "../api/client";
 
+type HoPolicyComparison = {
+  reactiveLegacyHoCount: number;
+  predictiveHoCount: number;
+  avgRsrpAtLegacyHoDbm: number | null;
+  avgRsrpAtPredictiveHoDbm: number | null;
+  signalHeadroomDb: number | null;
+  legacyRsrpFloorDbm: number;
+  predictiveWhileAboveLegacyFloor: number;
+  narrative: string;
+};
+
 type Overview = {
   kpis: {
     recentPredictions15m: number;
     handoverRecommendationsLastHour: number;
     avgLatencyMs: number;
     highRiskPredictionsLastHour: number;
+    hoSuccessRate: number;
   };
+  hoPolicyComparison?: HoPolicyComparison;
   alerts: { id: string; severity: "high" | "medium"; message: string }[];
 };
 
@@ -23,7 +36,7 @@ export function OperatorPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
-  const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const fetchOverview = useCallback(async () => {
     try {
@@ -50,11 +63,13 @@ export function OperatorPage() {
   };
 
   const kpi = overview?.kpis;
+  const pol = overview?.hoPolicyComparison;
   const alerts = overview?.alerts ?? [];
 
   const kpiCards = [
     { label: "Predictions (15m)", value: kpi?.recentPredictions15m ?? 0, gradient: "linear-gradient(135deg,#22d3ee,#3b82f6)", icon: <SignalCellularAltRoundedIcon /> },
     { label: "Handover Recs (1h)", value: kpi?.handoverRecommendationsLastHour ?? 0, gradient: "linear-gradient(135deg,#a855f7,#6366f1)", icon: <CellTowerRoundedIcon /> },
+    { label: "HO Success Rate", value: (kpi?.hoSuccessRate ?? 0) + "%", gradient: "linear-gradient(135deg,#10b981,#059669)", icon: <SignalCellularAltRoundedIcon /> },
     { label: "Avg Latency (ms)", value: kpi?.avgLatencyMs?.toFixed(1) ?? "0", gradient: "linear-gradient(135deg,#f59e0b,#ef4444)", icon: <SpeedRoundedIcon /> },
     { label: "High Risk (1h)", value: kpi?.highRiskPredictionsLastHour ?? 0, gradient: "linear-gradient(135deg,#ef4444,#dc2626)", icon: <WarningAmberRoundedIcon /> },
   ];
@@ -69,23 +84,9 @@ export function OperatorPage() {
         </Box>
         {/* Playback controls */}
         <Stack direction="row" spacing={1.5} alignItems="center">
-          <IconButton onClick={togglePlay} size="small" sx={{ bgcolor: "rgba(34,211,238,0.1)", color: "#22d3ee", border: "1px solid rgba(34,211,238,0.2)", "&:hover": { bgcolor: "rgba(34,211,238,0.2)" } }}>
-            {playing ? <PauseRoundedIcon fontSize="small" /> : <PlayArrowRoundedIcon fontSize="small" />}
-          </IconButton>
-          <ButtonGroup size="small">
-            {[0.5, 1, 2, 4].map(s => (
-              <Button key={s} onClick={() => changeSpeed(s)} sx={{
-                fontWeight: 700, fontSize: 12, px: 1.5,
-                color: speed === s ? "#0f172a" : "#475569",
-                bgcolor: speed === s ? "#22d3ee" : "transparent",
-                borderColor: "rgba(148,163,184,0.15)",
-                "&:hover": { bgcolor: speed === s ? "#22d3ee" : "rgba(255,255,255,0.05)" },
-              }}>{s}x</Button>
-            ))}
-          </ButtonGroup>
           <Stack direction="row" spacing={0.5} alignItems="center">
-            <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "#22c55e", animation: "pulse 2s infinite", "@keyframes pulse": { "0%": { boxShadow: "0 0 0 0 rgba(34,197,94,0.7)" }, "70%": { boxShadow: "0 0 0 6px rgba(34,197,94,0)" }, "100%": { boxShadow: "0 0 0 0 rgba(34,197,94,0)" } } }} />
-            <Typography variant="caption" sx={{ fontWeight: 700, color: "#22c55e" }}>LIVE</Typography>
+            <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "#a855f7" }} />
+            <Typography variant="caption" sx={{ fontWeight: 700, color: "#a855f7" }}>REAL DATA</Typography>
           </Stack>
         </Stack>
       </Stack>
@@ -106,6 +107,31 @@ export function OperatorPage() {
           </Card>
         ))}
       </Stack>
+
+      {pol && (pol.reactiveLegacyHoCount > 0 || pol.predictiveHoCount > 0) && (
+        <Card sx={{ background: "linear-gradient(90deg, rgba(127,29,29,0.25), rgba(30,58,138,0.35))", border: "1px solid rgba(248,113,113,0.2)" }}>
+          <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }} justifyContent="space-between">
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#fecaca", letterSpacing: 0.3 }}>
+                  Predictive vs legacy (live sim)
+                </Typography>
+                <Typography variant="caption" sx={{ color: "#cbd5e1", display: "block", mt: 0.5, maxWidth: 720 }}>
+                  {pol.narrative}
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Chip size="small" label={`Legacy HO: ${pol.reactiveLegacyHoCount}`} sx={{ fontWeight: 700, color: "#fecaca", borderColor: "rgba(248,113,113,0.4)" }} variant="outlined" />
+                <Chip size="small" label={`Predictive HO: ${pol.predictiveHoCount}`} sx={{ fontWeight: 700, color: "#67e8f9", borderColor: "rgba(34,211,238,0.4)" }} variant="outlined" />
+                <Chip size="small" label={`RSRP legacy avg: ${pol.avgRsrpAtLegacyHoDbm ?? "—"} dBm`} sx={{ fontWeight: 600, color: "#e2e8f0" }} variant="outlined" />
+                <Chip size="small" label={`RSRP predictive avg: ${pol.avgRsrpAtPredictiveHoDbm ?? "—"} dBm`} sx={{ fontWeight: 600, color: "#6ee7b7" }} variant="outlined" />
+                <Chip size="small" label={`Headroom: ${pol.signalHeadroomDb != null ? `+${pol.signalHeadroomDb} dB` : "—"}`} sx={{ fontWeight: 800, color: "#fde047" }} variant="outlined" />
+                <Chip size="small" label={`Proactive (above ${pol.legacyRsrpFloorDbm} dBm): ${pol.predictiveWhileAboveLegacyFloor}`} sx={{ fontWeight: 600, color: "#a5b4fc" }} variant="outlined" />
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Alerts */}
       {alerts.slice(0, 2).map(a => (

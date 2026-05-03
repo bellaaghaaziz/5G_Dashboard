@@ -157,6 +157,6 @@
     "velocity",
     "hour_of_day"
   ],
-  "dso4_threshold": 0.9000000000000001,
+  "dso4_threshold": 0.78,
   "dso4_stage1_gate_threshold": 0.3
 }
