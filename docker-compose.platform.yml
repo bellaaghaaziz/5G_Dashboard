@@ -1,0 +1,129 @@
+﻿services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: platform-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform123}
+      POSTGRES_DB: ${POSTGRES_DB:-platform_users}
+    ports:
+      - "5433:5432"
+    volumes:
+      - platform_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-platform} -d ${POSTGRES_DB:-platform_users}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: platform-redis
+    ports:
+      - "6379:6379"
+
+  user-service:
+    build:
+      context: .
+      dockerfile: docker/platform/user-service.Dockerfile
+    container_name: platform-user-service
+    environment:
+      USER_SERVICE_PORT: 3001
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform123}
+      POSTGRES_DB: ${POSTGRES_DB:-platform_users}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-access}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh}
+      JWT_ACCESS_EXPIRES: ${JWT_ACCESS_EXPIRES:-15m}
+      JWT_REFRESH_EXPIRES: ${JWT_REFRESH_EXPIRES:-7d}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@5g.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+      ADMIN_FULL_NAME: ${ADMIN_FULL_NAME:-Platform Admin}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  prediction-service:
+    build:
+      context: .
+      dockerfile: docker/platform/prediction-service.Dockerfile
+    container_name: platform-prediction-service
+    environment:
+      PREDICTION_SERVICE_PORT: 3002
+      PYTHON_INFERENCE_BASE_URL: ${PYTHON_INFERENCE_BASE_URL:-http://host.docker.internal:8000}
+    ports:
+      - "3002:3002"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  dashboard-service:
+    build:
+      context: .
+      dockerfile: docker/platform/dashboard-service.Dockerfile
+    container_name: platform-dashboard-service
+    environment:
+      DASHBOARD_SERVICE_PORT: 3003
+      PREDICTIONS_LOG_PATH: /app/shared-logs/predictions.json
+    volumes:
+      - ./logs:/app/shared-logs:ro
+    ports:
+      - "3003:3003"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3003/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: docker/platform/api-gateway.Dockerfile
+    container_name: platform-api-gateway
+    environment:
+      API_GATEWAY_PORT: 3000
+      USER_SERVICE_URL: http://user-service:3001
+      PREDICTION_SERVICE_URL: http://prediction-service:3002
+      DASHBOARD_SERVICE_URL: http://dashboard-service:3003
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-access}
+    ports:
+      - "3000:3000"
+    depends_on:
+      user-service:
+        condition: service_healthy
+      prediction-service:
+        condition: service_healthy
+      dashboard-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/platform/web.Dockerfile
+    container_name: platform-web
+    environment:
+      VITE_API_BASE_URL: http://localhost:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+
+volumes:
+  platform_pg_data:

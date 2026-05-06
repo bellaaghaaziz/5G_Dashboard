@@ -1,0 +1,55 @@
+# Python
+env/
+venv/
+.venv/
+.venv_new/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Node.js
+node_modules/
+dist/
+build/
+.npm/
+
+# Logs & Runtime
+logs/
+*.log
+mlflow.db
+mlruns/
+
+# Dataset & Large Files
+DATASET/
+*.csv
+*.parquet
+docs/CellPilot_Demo.gif
+
+# Trained Models (Too large for standard Git)
+*.pkl
+*.joblib
+*.keras
+models/
+
+# IDE & Editor
+.vscode/
+.idea/
+.ipynb_checkpoints/
+*.swp
+*.swo
+
+# Secrets
+.streamlit/secrets.toml
+.env
+.env.local
+.env.production
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Metrics
+metrics.json
