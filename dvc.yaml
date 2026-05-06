@@ -1,0 +1,17 @@
+stages:
+  prep:
+    cmd: python src/data_prep.py
+    deps:
+    - data/raw/
+    outs:
+    - data/processed/
+  train:
+    cmd: python train_mlflow.py
+    deps:
+    - data/processed/
+    - train_mlflow.py
+    outs:
+    - models/
+    metrics:
+    - metrics.json:
+        cache: false
