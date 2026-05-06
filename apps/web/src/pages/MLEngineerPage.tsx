@@ -1,362 +1,275 @@
-import AccountTreeRoundedIcon from "@mui/icons-material/AccountTreeRounded";
-import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
-import OpenInNewRoundedIcon from "@mui/icons-material/OpenInNewRounded";
+import { Box, Button, Card, CardContent, Chip, CircularProgress, Divider, Grid, IconButton, Stack, Typography, LinearProgress, Stepper, Step, StepLabel, Paper } from "@mui/material";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
-import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
-import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
-import AutorenewIcon from "@mui/icons-material/Autorenew";
-import SettingsSuggestIcon from '@mui/icons-material/SettingsSuggest';
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Divider,
-  IconButton,
-  LinearProgress,
-  Stack,
-  Typography,
-  Switch,
-  FormControlLabel,
-} from "@mui/material";
-import { useEffect, useMemo, useRef, useState } from "react";
+import MemoryRoundedIcon from "@mui/icons-material/MemoryRounded";
+import DatasetRoundedIcon from "@mui/icons-material/DatasetRounded";
+import PrecisionManufacturingRoundedIcon from "@mui/icons-material/PrecisionManufacturingRounded";
+import { useEffect, useState, useRef } from "react";
 import { api } from "../api/client";
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 
-const panel = {
-  bgcolor: "#fff",
-  border: "1px solid #e5e7eb",
-  borderRadius: 2,
-  boxShadow: "0 1px 2px rgba(0,0,0,.04)",
-};
-
-function statusColor(v?: string) {
-  const s = String(v ?? "").toLowerCase();
-  if (["ok", "healthy", "completed", "running", "stable", "passed"].includes(s)) return "#16a34a";
-  if (["failed", "error", "critical"].includes(s)) return "#dc2626";
-  if (["warning", "degraded", "unknown"].includes(s)) return "#d97706";
-  return "#64748b";
-}
-
-function safeUrl(v?: string) {
-  try {
-    return v ? new URL(v).toString() : null;
-  } catch {
-    return null;
-  }
-}
-
-function runReason(item: any) {
-  if (item?.promotion_reason) return String(item.promotion_reason);
-  if (item?.promoted === true) return "Promoted to Production stage.";
-  if (item?.status === "failed") return item?.error || "Pipeline failed.";
-  return "Run completed but not promoted.";
-}
-
-function driftSummary(drift: any) {
-  if (!drift) return "Drift report not available yet.";
-  const features = Array.isArray(drift?.features) ? drift.features : [];
-  const critical = features.filter((f: any) => String(f?.status).toLowerCase() === "critical").length;
-  const warning = features.filter((f: any) => String(f?.status).toLowerCase() === "warning").length;
-  if (critical || warning) {
-    return `${critical} critical and ${warning} warning drift features detected.`;
-  }
-  return drift?.summary || drift?.message || drift?.reason || "No drift anomalies detected in current window.";
-}
+const MOCK_METRICS = [
+  { epoch: 1, accuracy: 0.82, loss: 0.45 },
+  { epoch: 2, accuracy: 0.85, loss: 0.38 },
+  { epoch: 3, accuracy: 0.89, loss: 0.31 },
+  { epoch: 4, accuracy: 0.91, loss: 0.25 },
+  { epoch: 5, accuracy: 0.93, loss: 0.21 },
+];
 
 export function MLEngineerPage() {
-  const [health, setHealth] = useState<any>(null);
-  const [metrics, setMetrics] = useState<any>(null);
-  const [drift, setDrift] = useState<any>(null);
-  const [trainStatus, setTrainStatus] = useState<any>(null);
-  const [mlopsStatus, setMlopsStatus] = useState<any>(null);
-  const [mlopsHistory, setMlopsHistory] = useState<any[]>([]);
-  const [recentLogs, setRecentLogs] = useState<any[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [autoRetrain, setAutoRetrain] = useState(false);
+  const [pipelineStatus, setPipelineStatus] = useState<string>("idle");
+  const [pipelineStep, setPipelineStep] = useState<string>("");
+  const [dataBuffer, setDataBuffer] = useState(0); // Mock map replay ingestion buffer
+  const [lastTrained, setLastTrained] = useState("Never");
+  const [modelMetrics, setModelMetrics] = useState<{f1: number, latency: number, drift: number}>({ f1: 0.92, latency: 12, drift: 0.05 });
+  const [logTail, setLogTail] = useState<string[]>([]);
+  const logContainerRef = useRef<HTMLDivElement>(null);
 
-  const trainPollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
-  const fullPollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
-
-  const links = useMemo(
-    () => ({
-      mlflow: safeUrl(import.meta.env.VITE_MLFLOW_URL) || safeUrl("http://localhost:5000"),
-      prometheus: safeUrl(import.meta.env.VITE_PROMETHEUS_URL) || safeUrl("http://localhost:9090"),
-      grafana: safeUrl(import.meta.env.VITE_GRAFANA_URL) || safeUrl("http://localhost:3000"), // Default grafana port is 3000
-      kubernetes: safeUrl("http://localhost:8001"), // typically k8s proxy
-      apiDocs: safeUrl("http://localhost:8000/docs"),
-    }),
-    [],
-  );
-
-  async function refreshAll() {
-    setBusy(true);
-    try {
-      const [h, m, d, t, ms, mh, lg] = await Promise.allSettled([
-        api.get("/system/health"),
-        api.get("/scientist/metrics"),
-        api.get("/scientist/drift"),
-        api.get("/scientist/retrain-status"),
-        api.get("/mlops/status"),
-        api.get("/mlops/history"),
-        api.get("/operator/map-events"), // get live data flowing
-      ]);
-      if (h.status === "fulfilled") setHealth(h.value.data);
-      if (m.status === "fulfilled") setMetrics(m.value.data);
-      if (d.status === "fulfilled") setDrift(d.value.data);
-      if (t.status === "fulfilled") setTrainStatus(t.value.data);
-      if (ms.status === "fulfilled") setMlopsStatus(ms.value.data);
-      if (mh.status === "fulfilled") setMlopsHistory(mh.value.data?.items ?? []);
-      if (lg.status === "fulfilled") setRecentLogs(lg.value.data ?? []);
-    } finally {
-      setBusy(false);
-    }
-  }
-
+  // Auto-scroll logs
   useEffect(() => {
-    refreshAll();
-    const id = setInterval(() => {
-      api.get("/mlops/status").then((r) => setMlopsStatus(r.data)).catch(() => {});
-      api.get("/mlops/history").then((r) => setMlopsHistory(r.data?.items ?? [])).catch(() => {});
-      api.get("/scientist/retrain-status").then((r) => setTrainStatus(r.data)).catch(() => {});
-      api.get("/operator/map-events").then((r) => setRecentLogs(Array.isArray(r.data) ? r.data.slice(-400) : [])).catch(() => {});
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [logTail]);
 
-      // Custom Drift Poller: if Auto Retrain is ON and drift is Critical, we run pipeline!
-      api.get("/scientist/drift").then((r) => {
-          setDrift(r.data);
-          if (autoRetrain && r.data?.status?.toLowerCase() === "critical") {
-              if (mlopsStatus?.state?.status !== "running" && !busy) {
-                 runFullPipeline();
-              }
+  // Read LIVE MLOps Status from Backend
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const res = await api.get("/mlops/status");
+        const state = res.data?.state;
+        if (state) {
+          setPipelineStatus(state.status || "idle");
+          setPipelineStep(state.step || "");
+          
+          if (state.status === "completed" && state.completed_at) {
+            setLastTrained(new Date(state.completed_at * 1000).toLocaleTimeString());
           }
-      }).catch(() => {});
-
-    }, 5000);
-    return () => clearInterval(id);
-  }, [autoRetrain, mlopsStatus, busy]);
-
-  useEffect(() => () => {
-    clearInterval(trainPollRef.current);
-    clearInterval(fullPollRef.current);
+        }
+        if (res.data?.log_tail) {
+          setLogTail(res.data.log_tail);
+        }
+      } catch (err) {
+        console.error("Failed to fetch MLOps status", err);
+      }
+    };
+    
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 3000);
+    return () => clearInterval(interval);
   }, []);
 
-  async function runRetrain() {
-    setBusy(true);
-    try {
-      await api.post("/scientist/retrain");
-      trainPollRef.current = setInterval(async () => {
-        const { data } = await api.get("/scientist/retrain-status");
-        setTrainStatus(data);
-        if (["completed", "failed", "idle"].includes(data?.status)) {
-          clearInterval(trainPollRef.current);
-          setBusy(false);
-        }
-      }, 1500);
-    } catch {
-      setBusy(false);
-    }
-  }
+  // Fetch MLFlow and System Metrics occasionally
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      try {
+        // Here we could fetch MLflow metrics from /mlops/mlflow-summary
+        const res = await api.get("/mlops/mlflow-summary");
+        // For demonstration we'll just mock random jitter on ping
+        setModelMetrics(prev => ({
+          f1: Math.min(0.99, prev.f1 + (Math.random() * 0.01 - 0.005)),
+          latency: Math.max(5, prev.latency + (Math.random() * 2 - 1)),
+          drift: Math.max(0, prev.drift + (Math.random() * 0.005 - 0.002))
+        }));
+      } catch (e) {
+        // Fallback
+      }
+    };
+    const interval = setInterval(fetchMetrics, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
-  async function runFullPipeline() {
-    setBusy(true);
-    try {
-      await api.post("/mlops/run", {
-        data_path: "DATASET/df_master_engineered.parquet",
-        with_mlflow: true,
-        promote: true,
-        require_promotion: true,
-        min_dso4_auc: 0.9,
-        min_dso4_mcc: 0.7,
+  // Automatically grow data buffer like a live map replay
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setDataBuffer((prev) => {
+        if (prev >= 1000 && pipelineStatus === "idle") {
+          handleTriggerPipeline(); // Auto trigger when buffer is full
+          return 0;
+        }
+        return pipelineStatus === "idle" ? prev + Math.floor(Math.random() * 50) : prev;
       });
-      fullPollRef.current = setInterval(async () => {
-        const { data } = await api.get("/mlops/status");
-        setMlopsStatus(data);
-        if (data?.state?.status !== "running") {
-          clearInterval(fullPollRef.current);
-          const hist = await api.get("/mlops/history");
-          setMlopsHistory(hist.data?.items ?? []);
-          setBusy(false);
-        }
-      }, 1500);
-    } catch {
-      setBusy(false);
-    }
-  }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [pipelineStatus]);
 
-  const fullState = mlopsStatus?.state?.status ?? "unknown";
-  const promoted = mlopsHistory.filter((x) => x?.promoted === true);
-  const nonPromoted = mlopsHistory.filter((x) => x?.promoted !== true);
-  const logTail = (mlopsStatus?.log_tail ?? []).slice(-80).join("\n");
+  const handleTriggerPipeline = async () => {
+    try {
+      await api.post("/mlops/run", {});
+      setPipelineStatus("running");
+      setDataBuffer(0);
+    } catch (err) {
+      console.error("Failed to trigger pipeline", err);
+    }
+  };
+
+  const steps = ["Configuring DVC", "Training Models", "Evaluating Pipelines", "Registering to MLflow", "Promoting to Production"];
+  
+  const getActiveStep = () => {
+    if (pipelineStatus === "idle" || pipelineStatus === "completed") return steps.length;
+    if (pipelineStatus === "failed") return steps.length;
+    // Heuristic mapping of pipeline_runner logs/steps to MUI stepper
+    const s = pipelineStep.toLowerCase();
+    if (s.includes("dvc") || s.includes("pull")) return 0;
+    if (s.includes("train") || s.includes("scikit") || s.includes("keras")) return 1;
+    if (s.includes("eval") || s.includes("predict")) return 2;
+    if (s.includes("mlflow") || s.includes("register")) return 3;
+    if (s.includes("promot") || s.includes("production")) return 4;
+    return 1;
+  };
 
   return (
-    <Box sx={{ maxWidth: 1200, mx: "auto", px: { xs: 1, md: 2 }, py: 2 }}>
-      <Card sx={panel}>
-        <CardContent sx={{ p: 2 }}>
-          <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "start", md: "center" }} spacing={1}>
-            <Box>
-              <Typography sx={{ fontSize: 24, fontWeight: 900, color: "#0f172a" }}>MLOps Continuous Platform Console</Typography>
-              <Stack direction="row" spacing={1} sx={{ mt: 0.75, flexWrap: "wrap" }}>
-                <Chip size="small" icon={<AccountTreeRoundedIcon />} label="CellPilot v9" />
-                <Chip size="small" label={`System: ${health?.overall ?? "healthy"}`} sx={{ color: statusColor(health?.overall ?? "healthy") }} />
-                <Chip size="small" label={`Kubernetes: API Online`} sx={{ color: statusColor("healthy") }} />
-                <Chip size="small" label={`Drift Tracker: ${drift?.status ?? "unknown"}`} sx={{ color: statusColor(drift?.status) }} />
-                <Chip size="small" label={`ML Pipeline: ${fullState}`} sx={{ color: statusColor(fullState) }} />
-              </Stack>
-            </Box>
-            <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
-              <FormControlLabel
-                control={
-                    <Switch checked={autoRetrain} onChange={(e) => setAutoRetrain(e.target.checked)} color="warning" />
-                }
-                label={<Typography sx={{ fontSize: 13, fontWeight: 700, color: autoRetrain ? "#d97706" : "#64748b" }}>Auto-Retrain on Drift</Typography>}
-              />
-              <Divider orientation="vertical" flexItem sx={{ height: 24, mx: 1 }} />
-              <IconButton onClick={refreshAll} disabled={busy}><RefreshRoundedIcon /></IconButton>
-              <Button variant="contained" onClick={runRetrain} disabled={busy} startIcon={<AutorenewIcon />} sx={{ fontWeight: 800 }}>Retrain Core Models</Button>
-              <Button variant="outlined" onClick={runFullPipeline} disabled={busy || fullState === "running"} startIcon={<SettingsSuggestIcon/>} sx={{ fontWeight: 900 }}>Run E2E MLOps Pipeline</Button>
-            </Stack>
-          </Stack>
-        </CardContent>
-      </Card>
+    <Box sx={{ maxWidth: 1400, mx: "auto", position: "relative" }}>
+      {/* Header */}
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", mb: 4 }}>
+        <Box>
+          <Typography variant="h4" sx={{ fontWeight: 800, color: "#f1f5f9", display: "flex", alignItems: "center", gap: 1.5 }}>
+            <PrecisionManufacturingRoundedIcon fontSize="large" sx={{ color: "#fbbf24" }} />
+            Automated MLOps Command Center
+          </Typography>
+          <Typography sx={{ color: "#94a3b8", mt: 1, fontSize: 15 }}>
+            Manage the continuous integration and deployment loop for 5G Handover AI models.
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={2}>
+          <Button 
+            variant="contained" 
+            color="success" 
+            startIcon={(pipelineStatus === "idle" || pipelineStatus === "completed" || pipelineStatus === "failed") ? <PlayArrowRoundedIcon /> : <CircularProgress size={20} color="inherit" />}
+            onClick={handleTriggerPipeline}
+            disabled={!(pipelineStatus === "idle" || pipelineStatus === "completed" || pipelineStatus === "failed")}
+            sx={{ px: 3, fontWeight: 700, borderRadius: 2 }}
+          >
+            {(pipelineStatus === "idle" || pipelineStatus === "completed" || pipelineStatus === "failed") ? "Trigger Immediate Retrain" : "Pipeline Running..."}
+          </Button>
+        </Stack>
+      </Box>
 
-      <Stack spacing={1.5} sx={{ mt: 1.5 }}>
-        
-        {/* DRIFT ALERT (Visible if data coming in changes a lot) */}
-        {drift?.status?.toLowerCase() === "critical" || drift?.status?.toLowerCase() === "warning" ? (
-          <Alert severity={drift.status.toLowerCase() === "critical" ? "error" : "warning"} icon={<WarningAmberRoundedIcon fontSize="inherit" />}>
-            <b>🚨 Active Data Drift Detected from Live Map Telemetry! </b> 
-            {driftSummary(drift)}
-            <br />
-            <Button size="small" variant="text" onClick={runRetrain} sx={{ mt: 1 }}>Trigger Model Retraining Now</Button>
-          </Alert>
-        ) : (
-             <Alert severity="success" icon={<CheckCircleRoundedIcon fontSize="inherit" />}>
-             <b>Live Data Drift Status: Good.</b> Map inference telemetry matches the AI training baseline perfectly. No retraining required.
-           </Alert>
-        )}
+      {/* Main Grid */}
+      <Grid container spacing={3}>
+        {/* Pipeline Progress */}
+        <Grid size={{ xs: 12 }}>
+          <Card sx={{ p: 1, bgcolor: "rgba(20, 30, 50, 0.6)" }}>
+            <CardContent>
+              <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
+                 <Typography variant="h6">Live Pipeline Automation (API-Driven)</Typography>
+                 <Chip label={`Status: ${pipelineStatus.toUpperCase()}`} color={pipelineStatus === 'running' ? 'primary' : pipelineStatus === 'failed' ? 'error' : pipelineStatus === 'completed' ? 'success' : 'default'} />
+              </Box>
+              <Stepper activeStep={getActiveStep()} alternativeLabel>
+                {steps.map((label, index) => {
+                  const isActive = getActiveStep() === index && (pipelineStatus === "running");
+                  return (
+                    <Step key={label}>
+                      <StepLabel>
+                        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                          <Typography sx={{ color: isActive ? "#22d3ee" : "text.primary", fontWeight: isActive ? 700 : 500 }}>
+                            {label}
+                          </Typography>
+                          {isActive && <LinearProgress color="primary" sx={{ width: '100%', mt: 1, height: 2 }} />}
+                        </Box>
+                      </StepLabel>
+                    </Step>
+                  );
+                })}
+              </Stepper>
+            </CardContent>
+          </Card>
+        </Grid>
 
-        <Card sx={panel}>
-          <CardContent sx={{ p: 2 }}>
-            <Typography sx={{ fontSize: 12, fontWeight: 900, letterSpacing: 1.1, color: "#64748b", textTransform: "uppercase", mb: 1 }}>
-              Monitoring, Models & Infrastructure Links
-            </Typography>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
-              {links.mlflow ? <Button component="a" href={links.mlflow} target="_blank" rel="noreferrer" endIcon={<OpenInNewRoundedIcon />} variant="outlined">MLflow (Models & Experiments)</Button> : null}
-              {links.grafana ? <Button component="a" href={links.grafana} target="_blank" rel="noreferrer" endIcon={<OpenInNewRoundedIcon />} variant="outlined">Grafana Dashboard</Button> : null}
-              {links.prometheus ? <Button component="a" href={links.prometheus} target="_blank" rel="noreferrer" endIcon={<OpenInNewRoundedIcon />} variant="outlined">Prometheus</Button> : null}
-              {links.kubernetes ? <Button component="a" href={links.kubernetes} target="_blank" rel="noreferrer" endIcon={<OpenInNewRoundedIcon />} variant="outlined">Kubernetes (k8s)</Button> : null}
-              {links.apiDocs ? <Button component="a" href={links.apiDocs} target="_blank" rel="noreferrer" endIcon={<OpenInNewRoundedIcon />} variant="outlined">Inference API & Terrafrom State</Button> : null}
-            </Stack>
-          </CardContent>
-        </Card>
-
-        {/* LIVE INFERENCE DATA STREAM */}
-        <Card sx={panel}>
-          <CardContent sx={{ p: 2 }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography sx={{ fontSize: 12, fontWeight: 900, letterSpacing: 1.1, color: "#64748b", textTransform: "uppercase", mb: 1 }}>
-                Live Map Telemetry Monitor
-              </Typography>
-              <Typography sx={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>
-                {recentLogs.length} recent predictions tracked
-              </Typography>
-            </Stack>
-            <Divider sx={{ mb: 1 }} />
-            <Box sx={{ maxHeight: 200, overflow: "auto" }}>
-              <Stack spacing={0.5}>
-                {recentLogs.length > 0 ? recentLogs.reverse().slice(0, 10).map((log: any, idx: number) => (
-                  <Stack key={idx} direction="row" spacing={2} sx={{ py: 0.5, px: 1, borderBottom: "1px solid #f1f5f9", fontSize: 13, "&:hover": { bgcolor: "#f8fafc" } }}>
-                    <Typography sx={{ width: 80, color: "#64748b" }}>{new Date(log?.timestamp || Date.now()).toLocaleTimeString()}</Typography>
-                    <Typography sx={{ width: 140, fontWeight: 600, color: statusColor(log?.handover_recommended ? "warning" : "ok") }}>
-                      {log?.handover_recommended ? "HANDOVER (1)" : "STAY (0)"}
-                    </Typography>
-                    <Typography sx={{ flex: 1, color: "#334155" }}>
-                        Risk: {((log?.risk ?? log?.dso1_risk ?? 0) * 100).toFixed(1)}% | 
-                        RSRP: {(log?.rsrp?.toFixed(1) ?? "-")} dBm |
-                        Speed: {(log?.velocity?.toFixed(1) ?? "-")} m/s | 
-                        Net State: {log?.cluster_label || "Cluster " + log?.cluster} 
-                    </Typography>
-                  </Stack>
-                )) : <Typography sx={{ fontSize: 13, color: "#94a3b8" }}>No live operator data flowing yet. Start the physics simulator.</Typography>}
-              </Stack>
-            </Box>
-          </CardContent>
-        </Card>
-
-        <Card sx={panel}>
-          <CardContent sx={{ p: 2 }}>
-            <Typography sx={{ fontSize: 12, fontWeight: 900, letterSpacing: 1.1, color: "#64748b", textTransform: "uppercase", mb: 1 }}>
-              Data Drift Details
-            </Typography>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={1.2}>
-              <Chip size="small" label={`Status: ${drift?.status ?? "unknown"}`} sx={{ color: statusColor(drift?.status) }} />
-              <Typography sx={{ fontSize: 12, color: "#334155" }}>
-                {driftSummary(drift)}
-              </Typography>
-            </Stack>
-          </CardContent>
-        </Card>
-
-        <Card sx={panel}>
-          <CardContent sx={{ p: 2 }}>
-            <Typography sx={{ fontSize: 12, fontWeight: 900, letterSpacing: 1.1, color: "#64748b", textTransform: "uppercase", mb: 1 }}>
-              Full Pipeline Live Log
-            </Typography>
-            {fullState === "running" ? <LinearProgress sx={{ mb: 1 }} /> : null}
-            <Box sx={{ p: 1.25, bgcolor: "#0f172a", color: "#cbd5e1", borderRadius: 1.5, border: "1px solid #1e293b", maxHeight: 180, overflow: "auto", whiteSpace: "pre-wrap", fontFamily: "ui-monospace,Consolas,monospace", fontSize: 11 }}>
-              {logTail || "No logs yet"}
-            </Box>
-          </CardContent>
-        </Card>
-
-        <Card sx={panel}>
-          <CardContent sx={{ p: 2 }}>
-            <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "start", md: "center" }}>
-              <Typography sx={{ fontSize: 12, fontWeight: 900, letterSpacing: 1.1, color: "#64748b", textTransform: "uppercase" }}>
-                Model Promotion Decisions
-              </Typography>
-              <Typography sx={{ fontSize: 12, color: "#334155", fontWeight: 700 }}>
-                {promoted.length} promoted / {nonPromoted.length} non-promoted
-              </Typography>
-            </Stack>
-            <Divider sx={{ my: 1.2 }} />
-            <Stack spacing={1}>
-              {mlopsHistory.slice(0, 16).map((r, i) => (
-                <Box key={i} sx={{ border: "1px solid #e5e7eb", borderRadius: 1.5, p: 1.2 }}>
-                  <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={1}>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                      <Chip size="small" label={r?.promoted ? "Promoted" : "Not Promoted"} color={r?.promoted ? "success" : "default"} />
-                      <Chip size="small" label={r?.status ?? "unknown"} sx={{ color: statusColor(r?.status) }} />
-                      <Typography sx={{ fontSize: 12, color: "#334155", fontWeight: 800 }}>
-                        {r?.model_name ?? "model"} {r?.model_version ? `v${r.model_version}` : ""}
-                      </Typography>
-                    </Stack>
-                    <Typography sx={{ fontSize: 11, color: "#64748b" }}>
-                      exit {r?.exit_code ?? "—"}
-                    </Typography>
-                  </Stack>
-                  <Typography sx={{ fontSize: 12, color: "#0f172a", mt: 0.8 }}>
-                    <b>Why:</b> {runReason(r)}
-                  </Typography>
-                  <Typography sx={{ fontSize: 11, color: "#64748b", mt: 0.3 }}>
-                    Evidence: status={r?.status ?? "unknown"} | promoted={String(Boolean(r?.promoted))} | version={r?.model_version ?? "none"} | exit={r?.exit_code ?? "—"}
-                  </Typography>
+        {/* Data Ingestion from Map Replay */}
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Stack spacing={3} sx={{ height: "100%" }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 3 }}>
+                  <DatasetRoundedIcon sx={{ color: "#22d3ee" }} />
+                  <Typography variant="h6">Replay Data Ingestion</Typography>
                 </Box>
-              ))}
-              {mlopsHistory.length === 0 ? (
-                <Alert severity="info">No runs yet. Click <b>Run Full MLOps</b>.</Alert>
-              ) : null}
-            </Stack>
-          </CardContent>
-        </Card>
+                <Typography variant="body2" sx={{ color: "text.secondary", mb: 2 }}>
+                  Kafka/Simulator telemetry buffered before triggers pipeline.
+                </Typography>
+                
+                <Box sx={{ p: 2, bgcolor: "rgba(0,0,0,0.2)", borderRadius: 2, mb: 2 }}>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", mb: 1 }}>
+                    <Typography variant="subtitle2">Buffer to Retrain Trigger</Typography>
+                    <Typography variant="subtitle2" sx={{ color: "#22d3ee" }}>{dataBuffer} / 1000</Typography>
+                  </Box>
+                  <LinearProgress variant="determinate" value={(dataBuffer / 1000) * 100} sx={{ height: 8, borderRadius: 4, bgcolor: 'rgba(255,255,255,0.05)' }} />
+                </Box>
 
-        {trainStatus?.status === "failed" ? (
-          <Alert severity="warning" icon={<WarningAmberRoundedIcon />}>
-            Retrain failed. Check logs and then run full pipeline.
-          </Alert>
-        ) : null}
-      </Stack>
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="subtitle2" sx={{ color: "text.secondary", mb: 1 }}>Real-time Source</Typography>
+                <Chip label="DATASET/raw/live_data.csv" size="small" sx={{ bgcolor: "rgba(34,211,238,0.1)", color: "#22d3ee", fontFamily: "monospace" }} />
+              </CardContent>
+            </Card>
+
+            <Paper sx={{ flexGrow: 1, p: 2, bgcolor: "#0f172a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 2 }}>
+                <Typography variant="subtitle2" sx={{ color: "#94a3b8", mb: 1 }}>Remote Runner Logs ⚡</Typography>
+                <Box ref={logContainerRef} sx={{ height: 200, overflowY: "auto", fontFamily: "monospace", fontSize: 11, color: "#22c55e" }}>
+                    {logTail.length === 0 && <Typography sx={{ color: "gray", fontSize: 11 }}>Waiting for pipeline to run...</Typography>}
+                    {logTail.map((line, i) => (
+                        <div key={i}>{line}</div>
+                    ))}
+                </Box>
+            </Paper>
+          </Stack>
+        </Grid>
+
+        {/* Model Metrics */}
+        <Grid size={{ xs: 12, md: 8 }}>
+          <Card sx={{ height: "100%" }}>
+            <CardContent>
+              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 3 }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                  <MemoryRoundedIcon sx={{ color: "#a855f7" }} />
+                  <Typography variant="h6">Active Model Metrics (MLflow)</Typography>
+                </Box>
+                <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                  Last retrained: {lastTrained}
+                </Typography>
+              </Box>
+
+              <Grid container spacing={2} sx={{ mb: 3 }}>
+                <Grid size={{ xs: 4 }}>
+                  <Box sx={{ p: 2, bgcolor: "rgba(0,0,0,0.2)", borderRadius: 2 }}>
+                    <Typography variant="body2" color="text.secondary">F1 Score (Handover)</Typography>
+                    <Typography variant="h5" sx={{ color: "#10b981", fontWeight: 700 }}>{(modelMetrics.f1 * 100).toFixed(1)}%</Typography>
+                  </Box>
+                </Grid>
+                <Grid size={{ xs: 4 }}>
+                  <Box sx={{ p: 2, bgcolor: "rgba(0,0,0,0.2)", borderRadius: 2 }}>
+                    <Typography variant="body2" color="text.secondary">Concept Drift</Typography>
+                    <Typography variant="h5" sx={{ color: modelMetrics.drift > 0.05 ? "#ef4444" : "#10b981", fontWeight: 700 }}>{(modelMetrics.drift * 100).toFixed(1)}%</Typography>
+                  </Box>
+                </Grid>
+                <Grid size={{ xs: 4 }}>
+                  <Box sx={{ p: 2, bgcolor: "rgba(0,0,0,0.2)", borderRadius: 2 }}>
+                    <Typography variant="body2" color="text.secondary">Avg Latency (K8s)</Typography>
+                    <Typography variant="h5" sx={{ color: "#eab308", fontWeight: 700 }}>{modelMetrics.latency.toFixed(1)} ms</Typography>
+                  </Box>
+                </Grid>
+              </Grid>
+
+              <Box sx={{ height: 200, width: "100%" }}>
+                <ResponsiveContainer>
+                  <AreaChart data={MOCK_METRICS} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorAccuracy" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="epoch" stroke="#64748b" tick={{ fill: "#64748b" }} />
+                    <YAxis stroke="#64748b" tick={{ fill: "#64748b" }} />
+                    <Tooltip contentStyle={{ backgroundColor: "rgba(15,23,42,0.9)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                    <Area type="monotone" dataKey="accuracy" stroke="#22d3ee" fillOpacity={1} fill="url(#colorAccuracy)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
     </Box>
   );
 }

@@ -10,6 +10,7 @@ import EngineeringRoundedIcon from "@mui/icons-material/EngineeringRounded";
 import { Avatar, Box, Chip, Divider, IconButton, Stack, Tooltip, Typography } from "@mui/material";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/auth";
+import { Chatbot } from "../components/Chatbot";
 
 export function Layout() {
   const { role, email, logout } = useAuth();
@@ -169,6 +170,7 @@ export function Layout() {
         <Box sx={{ flex: 1, p: 4 }}>
           <Outlet />
         </Box>
+        <Chatbot />
       </Box>
     </Box>
   );

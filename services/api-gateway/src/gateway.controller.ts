@@ -97,6 +97,58 @@ export class GatewayController {
     return this.gatewayService.proxyToML("/mlops/mlflow-summary", "GET");
   }
 
+  // ── Prometheus / Grafana / MLflow UI proxies ──
+
+  @Get("prometheus/query")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  prometheusQuery(@Headers("authorization") authHeader: string, @Inject("REQUEST") req: any) {
+    const q = req.query?.query || req.query?.q || "";
+    const start = req.query?.start ? `&start=${encodeURIComponent(req.query.start)}` : "";
+    const end = req.query?.end ? `&end=${encodeURIComponent(req.query.end)}` : "";
+    const step = req.query?.step ? `&step=${encodeURIComponent(req.query.step)}` : "";
+    const path = `/api/v1/query?query=${encodeURIComponent(q)}${start}${end}${step}`;
+    return this.gatewayService.proxyToPrometheus(path, "GET", undefined, authHeader);
+  }
+
+  @Get("prometheus/query_range")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  prometheusQueryRange(@Headers("authorization") authHeader: string, @Inject("REQUEST") req: any) {
+    const q = req.query?.query || req.query?.q || "";
+    const start = req.query?.start || "";
+    const end = req.query?.end || "";
+    const step = req.query?.step || "";
+    const path = `/api/v1/query_range?query=${encodeURIComponent(q)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&step=${encodeURIComponent(step)}`;
+    return this.gatewayService.proxyToPrometheus(path, "GET", undefined, authHeader);
+  }
+
+  @Get("grafana/search")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  grafanaSearch(@Headers("authorization") authHeader: string, @Inject("REQUEST") req: any) {
+    const q = req.query?.query || req.query?.q || "";
+    const path = `/api/search?query=${encodeURIComponent(q)}`;
+    return this.gatewayService.proxyToGrafana(path, "GET", undefined, authHeader);
+  }
+
+  @Get("grafana/dashboards/:uid")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  grafanaDashboard(@Headers("authorization") authHeader: string, @Inject("REQUEST") req: any) {
+    const uid = req.params?.uid;
+    const path = `/api/dashboards/uid/${uid}`;
+    return this.gatewayService.proxyToGrafana(path, "GET", undefined, authHeader);
+  }
+
+  @Get("mlflow/ui")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  mlflowUi(@Headers("authorization") authHeader: string) {
+    // Proxy to MLflow UI root
+    return this.gatewayService.proxyToMLflow("/", "GET", undefined, authHeader);
+  }
+
   // ── Operator ──
 
   @Get("operator/overview")

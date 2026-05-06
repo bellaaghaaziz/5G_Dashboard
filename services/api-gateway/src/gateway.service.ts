@@ -22,6 +22,22 @@ export class GatewayService {
     return this.config.get<string>("ML_SERVICE_URL", "http://localhost:8000");
   }
 
+  private get prometheusBase() {
+    return this.config.get<string>("PROMETHEUS_URL", "http://localhost:9090");
+  }
+
+  private get grafanaBase() {
+    return this.config.get<string>("GRAFANA_URL", "http://localhost:3000");
+  }
+
+  private get mlflowBase() {
+    return this.config.get<string>("MLFLOW_URL", "http://localhost:5000");
+  }
+
+  private get k8sBase() {
+    return this.config.get<string>("K8S_DASHBOARD_URL", "http://localhost:8001");
+  }
+
   async proxy(baseUrl: string, path: string, method: Method, body?: unknown, token?: string, timeout = 10000) {
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = token;
@@ -54,5 +70,22 @@ export class GatewayService {
 
   proxyToML(path: string, method: Method, body?: unknown, token?: string) {
     return this.proxy(this.mlServiceBase, path, method, body, token);
+  }
+
+  proxyToPrometheus(path: string, method: Method, body?: unknown, token?: string) {
+    // Prometheus often returns plain text; increase timeout for complex queries
+    return this.proxy(this.prometheusBase, path, method, body, token, 20000);
+  }
+
+  proxyToGrafana(path: string, method: Method, body?: unknown, token?: string) {
+    return this.proxy(this.grafanaBase, path, method, body, token);
+  }
+
+  proxyToMLflow(path: string, method: Method, body?: unknown, token?: string) {
+    return this.proxy(this.mlflowBase, path, method, body, token);
+  }
+
+  proxyToK8s(path: string, method: Method, body?: unknown, token?: string) {
+    return this.proxy(this.k8sBase, path, method, body, token);
   }
 }

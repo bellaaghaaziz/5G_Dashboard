@@ -98,6 +98,9 @@
       DASHBOARD_SERVICE_URL: http://dashboard-service:3003
       ML_SERVICE_URL: http://host.docker.internal:8000
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-access}
+      LLM_API_KEY: sk-ea7d2d1704574e36b3c606de752fb653
+      LLM_BASE_URL: https://tokenfactory.esprit.tn/api
+      LLM_MODEL: hosted_vllm/Llama-3.1-70B-Instruct
     ports:
       - "3000:3000"
     depends_on:
