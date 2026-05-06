@@ -12,9 +12,10 @@ const GLASS = {
     border: "1px solid rgba(255,255,255,0.08)",
     borderRadius: 3,
 };
-const roles = ["admin", "network_operator", "data_scientist"];
+const roles = ["admin", "network_operator", "data_scientist", "ml_engineer"];
 const roleColors = {
     admin: "error", network_operator: "primary", data_scientist: "secondary",
+    ml_engineer: "secondary",
 };
 function initials(name) {
     return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);

@@ -17,9 +17,10 @@ const GLASS = {
   borderRadius: 3,
 };
 
-const roles = ["admin", "network_operator", "data_scientist"];
+const roles = ["admin", "network_operator", "data_scientist", "ml_engineer"];
 const roleColors: Record<string, "error" | "primary" | "secondary"> = {
   admin: "error", network_operator: "primary", data_scientist: "secondary",
+  ml_engineer: "secondary",
 };
 
 function initials(name: string): string {

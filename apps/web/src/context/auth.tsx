@@ -1,6 +1,6 @@
 ﻿import { createContext, useContext, useMemo, useState } from "react";
 
-type Role = "admin" | "network_operator" | "data_scientist";
+type Role = "admin" | "network_operator" | "data_scientist" | "ml_engineer";
 
 type AuthState = {
   token: string | null;

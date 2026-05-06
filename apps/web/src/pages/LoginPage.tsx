@@ -7,6 +7,7 @@ const DEMO_USERS = [
   { label: "Admin", email: "admin@5g.local", password: "admin12345", color: "#ef4444", icon: "⚙️" },
   { label: "Operator", email: "operator@5g.local", password: "admin12345", color: "#22d3ee", icon: "📡" },
   { label: "Scientist", email: "scientist@5g.local", password: "admin12345", color: "#a855f7", icon: "🧬" },
+  { label: "ML Engineer", email: "mlops@5g.local", password: "admin12345", color: "#fbbf24", icon: "🛠️" },
 ];
 
 export function LoginPage() {

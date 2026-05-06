@@ -6,7 +6,7 @@ export function ProtectedRoute({
   allowedRoles,
 }: {
   children: React.ReactNode;
-  allowedRoles: Array<"admin" | "network_operator" | "data_scientist">;
+  allowedRoles: Array<"admin" | "network_operator" | "data_scientist" | "ml_engineer">;
 }) {
   const { token, role } = useAuth();
 

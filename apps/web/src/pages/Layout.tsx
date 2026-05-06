@@ -6,6 +6,7 @@ import MapRoundedIcon from "@mui/icons-material/MapRounded";
 import ScienceRoundedIcon from "@mui/icons-material/ScienceRounded";
 import SignalCellularAltRoundedIcon from "@mui/icons-material/SignalCellularAltRounded";
 import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
+import EngineeringRoundedIcon from "@mui/icons-material/EngineeringRounded";
 import { Avatar, Box, Chip, Divider, IconButton, Stack, Tooltip, Typography } from "@mui/material";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/auth";
@@ -22,6 +23,7 @@ export function Layout() {
         { label: "Home", to: "/app/home", icon: <HomeRoundedIcon />, show: true },
         { label: "Operator", to: "/app/operator", icon: <MapRoundedIcon />, show: role === "network_operator" || role === "admin" },
         { label: "Data Scientist", to: "/app/scientist", icon: <ScienceRoundedIcon />, show: role === "data_scientist" || role === "admin" },
+        { label: "ML Engineer", to: "/app/mlops", icon: <EngineeringRoundedIcon />, show: role === "ml_engineer" || role === "admin" },
         { label: "Admin", to: "/app/admin", icon: <AdminPanelSettingsRoundedIcon />, show: role === "admin" },
       ],
     },
@@ -40,6 +42,7 @@ export function Layout() {
     admin: { label: "Admin", color: "#ef4444" },
     network_operator: { label: "Operator", color: "#22d3ee" },
     data_scientist: { label: "Scientist", color: "#a855f7" },
+    ml_engineer: { label: "ML Engineer", color: "#fbbf24" },
   };
   const rc = roleConfig[role ?? ""] ?? { label: role ?? "", color: "#94a3b8" };
 

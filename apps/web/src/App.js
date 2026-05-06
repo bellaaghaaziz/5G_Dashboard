@@ -11,6 +11,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { OperatorPage } from "./pages/OperatorPage";
 import { HandoverHistoryPage } from "./pages/HandoverHistoryPage";
 import { ScientistPage } from "./pages/ScientistPage";
+import { MLEngineerPage } from "./pages/MLEngineerPage";
 const theme = createTheme({
     palette: {
         mode: "dark",
@@ -77,8 +78,10 @@ function RoleRedirect() {
         return _jsx(Navigate, { to: "/app/admin", replace: true });
     if (role === "network_operator")
         return _jsx(Navigate, { to: "/app/operator", replace: true });
+    if (role === "ml_engineer")
+        return _jsx(Navigate, { to: "/app/mlops", replace: true });
     return _jsx(Navigate, { to: "/app/scientist", replace: true });
 }
 export default function App() {
-    return (_jsxs(ThemeProvider, { theme: theme, children: [_jsx(CssBaseline, {}), _jsx(AuthProvider, { children: _jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/", element: _jsx(LandingPage, {}) }), _jsx(Route, { path: "/login", element: _jsx(LoginPage, {}) }), _jsxs(Route, { path: "/app", element: _jsx(Layout, {}), children: [_jsx(Route, { index: true, element: _jsx(RoleRedirect, {}) }), _jsx(Route, { path: "home", element: _jsx(ProtectedRoute, { allowedRoles: ["admin", "network_operator", "data_scientist"], children: _jsx(HomePage, {}) }) }), _jsx(Route, { path: "admin", element: _jsx(ProtectedRoute, { allowedRoles: ["admin"], children: _jsx(AdminPage, {}) }) }), _jsx(Route, { path: "operator", element: _jsx(ProtectedRoute, { allowedRoles: ["admin", "network_operator"], children: _jsx(OperatorPage, {}) }) }), _jsx(Route, { path: "operator/handovers", element: _jsx(ProtectedRoute, { allowedRoles: ["admin", "network_operator"], children: _jsx(HandoverHistoryPage, {}) }) }), _jsx(Route, { path: "scientist", element: _jsx(ProtectedRoute, { allowedRoles: ["admin", "data_scientist"], children: _jsx(ScientistPage, {}) }) })] })] }) }) })] }));
+    return (_jsxs(ThemeProvider, { theme: theme, children: [_jsx(CssBaseline, {}), _jsx(AuthProvider, { children: _jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/", element: _jsx(LandingPage, {}) }), _jsx(Route, { path: "/login", element: _jsx(LoginPage, {}) }), _jsxs(Route, { path: "/app", element: _jsx(Layout, {}), children: [_jsx(Route, { index: true, element: _jsx(RoleRedirect, {}) }), _jsx(Route, { path: "home", element: _jsx(ProtectedRoute, { allowedRoles: ["admin", "network_operator", "data_scientist", "ml_engineer"], children: _jsx(HomePage, {}) }) }), _jsx(Route, { path: "admin", element: _jsx(ProtectedRoute, { allowedRoles: ["admin"], children: _jsx(AdminPage, {}) }) }), _jsx(Route, { path: "operator", element: _jsx(ProtectedRoute, { allowedRoles: ["admin", "network_operator"], children: _jsx(OperatorPage, {}) }) }), _jsx(Route, { path: "operator/handovers", element: _jsx(ProtectedRoute, { allowedRoles: ["admin", "network_operator"], children: _jsx(HandoverHistoryPage, {}) }) }), _jsx(Route, { path: "scientist", element: _jsx(ProtectedRoute, { allowedRoles: ["admin", "data_scientist"], children: _jsx(ScientistPage, {}) }) }), _jsx(Route, { path: "mlops", element: _jsx(ProtectedRoute, { allowedRoles: ["admin", "ml_engineer"], children: _jsx(MLEngineerPage, {}) }) })] })] }) }) })] }));
 }

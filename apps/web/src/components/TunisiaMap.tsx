@@ -1,354 +1,582 @@
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  CircleMarker,
-  MapContainer,
-  TileLayer,
-  Tooltip,
-  useMap,
-  Polyline,
-} from "react-leaflet";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { MapContainer, TileLayer, useMap } from "react-leaflet";
 import { api } from "../api/client";
 
-// Fix Leaflet default icon
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
-  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-});
+type TowerStat = {
+  cell_id: number; lat: number; lng: number;
+  departures: number; arrivals: number; congestion_ratio: number;
+  avg_rsrp: number; status: "healthy" | "congested" | "high_risk";
+  is_active: boolean;
+};
 
-// Ruhr region bounding box
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+
 const RUHR_CENTER: [number, number] = [51.513, 7.465];
 
-// Named areas
-const AREAS = [
-  { name: "Bochum", lat: 51.482, lng: 7.216 },
-  { name: "Herne", lat: 51.537, lng: 7.225 },
-  { name: "Dortmund", lat: 51.514, lng: 7.466 },
-  { name: "Witten", lat: 51.433, lng: 7.353 },
-  { name: "Castrop-Rauxel", lat: 51.553, lng: 7.317 },
-];
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-const SCENARIO_CONFIG: Record<string, { emoji: string; label: string; color: string }> = {
-  hbahn:  { emoji: "🚋", label: "H-Bahn Train",   color: "#8b5cf6" },
-  mobile: { emoji: "📱", label: "Mobile Phone",    color: "#3b82f6" },
-  static: { emoji: "🏢", label: "Static Device",   color: "#06b6d4" },
+type PathPoint = {
+  lat: number; lng: number; timestamp: string;
+  rsrp: number; velocity: number; cell_id: number;
+  is_handover: boolean; is_recommended: boolean;
+  from_cell?: number; rsrp_gain?: number;
 };
 
-function getScenario(s: string) {
-  return SCENARIO_CONFIG[s] || { emoji: "📡", label: s || "Unknown", color: "#64748b" };
-}
-
-function riskColor(r: number): string {
-  if (r >= 0.55) return "#ef4444";
-  if (r >= 0.4) return "#f59e0b";
-  return "#22c55e";
-}
-
-type MapEvent = {
-  id: string;
-  ue_id: string;
-  cell_id: number;
-  rsrp: number;
-  sinr: number;
-  velocity: number;
-  scenario: string;
-  risk: number;
-  dso1_risk: number;
-  recommended: boolean;
-  cluster_label: string;
-  timestamp?: string;
-  ue_lat?: number | null;
-  ue_lng?: number | null;
+type Trip = {
+  ue_id: string; name?: string; scenario: string; color: string;
+  path: PathPoint[];
+  stats: { handover_count: number; ai_handovers: number; avg_rsrp: number; current_cell: number; current_rsrp: number; current_velocity: number; };
+  progress?: { cursor: number; total: number; pct: number };
 };
 
-type GpsLookup = Record<string, { lat: number; lng: number; scenario: string }>;
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-function FitRuhr() {
+const SCENARIO_ICON: Record<string, string> = { hbahn: "🚋", mobile: "📱", static: "🏢", pedestrian: "🚶", car: "🚗" };
+
+function sigColor(rsrp: number) { return rsrp >= -85 ? "#22c55e" : rsrp >= -100 ? "#f59e0b" : "#ef4444"; }
+function sigLabel(rsrp: number) { return rsrp >= -85 ? "Strong" : rsrp >= -100 ? "Fair" : "Weak"; }
+function fmtTime(ts: string) {
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+// ── Inject CSS once ───────────────────────────────────────────────────────────
+
+const BEACON_CSS = `
+.b-wrap { position:relative; width:72px; height:72px; }
+.b-ring {
+  position:absolute; width:44px; height:44px; border-radius:50%; border:1.5px solid;
+  top:50%; left:50%;
+  transform:translate(-50%,-50%) scale(0.1);
+  animation:b-ring 2.6s ease-out infinite;
+  pointer-events:none;
+}
+.b-ring2 { animation-delay:1.3s; }
+.b-ring3 { animation-delay:0.65s; opacity:0.5; }
+.b-dot {
+  position:absolute; width:13px; height:13px; border-radius:50%;
+  top:50%; left:50%; transform:translate(-50%,-50%);
+  animation:b-dot 2.4s ease-in-out infinite;
+}
+.b-dot-sel {
+  position:absolute; width:16px; height:16px; border-radius:50%;
+  top:50%; left:50%; transform:translate(-50%,-50%);
+  border:2.5px solid rgba(255,255,255,0.9);
+  animation:b-dot 1.8s ease-in-out infinite;
+}
+@keyframes b-ring {
+  0%   { transform:translate(-50%,-50%) scale(0.1);  opacity:0.9; }
+  100% { transform:translate(-50%,-50%) scale(3.2);  opacity:0; }
+}
+@keyframes b-dot {
+  0%,100% { filter:brightness(1)   drop-shadow(0 0 6px currentColor); transform:translate(-50%,-50%) scale(1); }
+  50%      { filter:brightness(1.5) drop-shadow(0 0 14px currentColor); transform:translate(-50%,-50%) scale(1.2); }
+}
+.ho-flash {
+  position:absolute; width:40px; height:40px; border-radius:50%; border:2px solid;
+  top:50%; left:50%;
+  animation:ho-flash 0.9s ease-out forwards;
+  pointer-events:none;
+}
+@keyframes ho-flash {
+  0%   { transform:translate(-50%,-50%) scale(0.2); opacity:1; }
+  100% { transform:translate(-50%,-50%) scale(3.5); opacity:0; }
+}
+.leaflet-tooltip { background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important; }
+.leaflet-tooltip::before { display:none!important; }
+.leaflet-container { font-family:Inter,sans-serif; }
+`;
+
+if (typeof document !== "undefined" && !document.getElementById("cp-beacon-css")) {
+  const el = document.createElement("style");
+  el.id = "cp-beacon-css";
+  el.textContent = BEACON_CSS;
+  document.head.appendChild(el);
+}
+
+// ── Beacon icon factory ───────────────────────────────────────────────────────
+
+function makeBeacon(color: string, selected: boolean): L.DivIcon {
+  const dotClass = selected ? "b-dot-sel" : "b-dot";
+  const glow = selected ? 22 : 11;
+  const extra = selected ? `,0 0 3px white` : "";
+  return L.divIcon({
+    className: "",
+    iconSize: [72, 72] as [number, number],
+    iconAnchor: [36, 36] as [number, number],
+    html: `<div class="b-wrap">
+      <div class="b-ring"  style="border-color:${color}45"></div>
+      <div class="b-ring b-ring2" style="border-color:${color}65"></div>
+      <div class="b-ring b-ring3" style="border-color:${color}30"></div>
+      <div class="${dotClass}" style="background:${color};color:${color};box-shadow:0 0 ${glow}px ${color}${extra}"></div>
+    </div>`,
+  });
+}
+
+// ── Handover flash ────────────────────────────────────────────────────────────
+
+function triggerHandoverFlash(map: L.Map, pos: [number, number], color: string) {
+  const icon = L.divIcon({
+    className: "",
+    iconSize: [80, 80],
+    iconAnchor: [40, 40],
+    html: `<div class="b-wrap" style="width:80px;height:80px;"><div class="ho-flash" style="border-color:${color};width:50px;height:50px;"></div></div>`,
+  });
+  const m = L.marker(pos, { icon, zIndexOffset: -100, interactive: false }).addTo(map);
+  setTimeout(() => m.remove(), 950);
+}
+
+// ── Animated layer — steps through intermediate towers, no big jumps ─────────
+//
+// Tracks progress by ISO timestamp, not cell_id.  Tracking by cell_id breaks
+// when a device bounces back to a tower it just left (#476→#80→#476): the
+// search finds #476 at the END of the path and returns an empty slice, so the
+// device never moves.  Timestamps are monotonically increasing so the filter
+// `ts > prevTimestamp` always returns exactly the new points.
+
+const ANIM_STEP_MS = 220;  // ms between tower hops
+
+type DevState = {
+  marker: L.Marker;
+  prevTimestamp: string | null;  // ISO ts of last consumed path point
+  prevCell: number | null;       // cell_id at prevTimestamp (for dedup)
+  selected: boolean;
+  color: string;
+  queue: Array<[number, number]>;
+  timer: ReturnType<typeof setInterval> | null;
+};
+
+function AnimatedLayer({ trips, selectedUE, onSelect }: {
+  trips: Trip[];
+  selectedUE: string | null;
+  onSelect: (id: string | null) => void;
+}) {
   const map = useMap();
+  const devs = useRef<Map<string, DevState>>(new Map());
+  const cbRef = useRef(onSelect);
+  useEffect(() => { cbRef.current = onSelect; }, [onSelect]);
+
   useEffect(() => {
-    map.setView(RUHR_CENTER, 12);
-  }, [map]);
+    const live = new Set(trips.map(t => t.ue_id));
+
+    for (const [id, s] of devs.current) {
+      if (!live.has(id)) {
+        if (s.timer) clearInterval(s.timer);
+        s.marker.remove();
+        devs.current.delete(id);
+      }
+    }
+
+    for (const trip of trips) {
+      const last = trip.path[trip.path.length - 1];
+      if (!last) continue;
+      const sel = selectedUE === trip.ue_id;
+
+      if (!devs.current.has(trip.ue_id)) {
+        const pos: [number, number] = [last.lat, last.lng];
+        const marker = L.marker(pos, { icon: makeBeacon(trip.color, sel), zIndexOffset: sel ? 1000 : 0 });
+        marker.addTo(map);
+        const ueId = trip.ue_id;
+        marker.on("click", () => cbRef.current(ueId));
+        // Anchor to current position — no steps needed yet
+        devs.current.set(ueId, {
+          marker,
+          prevTimestamp: last.timestamp,
+          prevCell: last.cell_id,
+          selected: sel, color: trip.color,
+          queue: [], timer: null,
+        });
+        continue;
+      }
+
+      const s = devs.current.get(trip.ue_id)!;
+      s.color = trip.color;
+
+      // Points newer than what we've already consumed (ISO string comparison is
+      // chronologically correct for UTC timestamps from the replayer)
+      const newPoints = s.prevTimestamp === null
+        ? trip.path
+        : trip.path.filter(p => p.timestamp > s.prevTimestamp!);
+
+      if (newPoints.length > 0) {
+        // Collect unique cell positions, deduplicating consecutive same-cell rows
+        const steps: Array<[number, number]> = [];
+        let lastCell = s.prevCell;
+        for (const p of newPoints) {
+          if (p.cell_id !== lastCell) {
+            steps.push([p.lat, p.lng]);
+            lastCell = p.cell_id;
+          }
+        }
+
+        s.prevTimestamp = last.timestamp;
+        s.prevCell = last.cell_id;
+
+        if (steps.length > 0) {
+          s.queue.push(...steps);
+          if (s.queue.length > 25) s.queue.splice(0, s.queue.length - 25);
+
+          if (!s.timer) {
+            const ref = s;
+            ref.timer = setInterval(() => {
+              const next = ref.queue.shift();
+              if (!next) {
+                clearInterval(ref.timer!);
+                ref.timer = null;
+                return;
+              }
+              ref.marker.setLatLng(next);
+              if (ref.queue.length === 0) triggerHandoverFlash(map, next, ref.color);
+            }, ANIM_STEP_MS);
+          }
+        }
+      }
+
+      if (s.selected !== sel) {
+        s.selected = sel;
+        s.marker.setIcon(makeBeacon(trip.color, sel));
+        s.marker.setZIndexOffset(sel ? 1000 : 0);
+      }
+    }
+  }, [trips, selectedUE, map]);
+
+  useEffect(() => () => {
+    for (const s of devs.current.values()) {
+      if (s.timer) clearInterval(s.timer);
+      s.marker.remove();
+    }
+    devs.current.clear();
+  }, []);
+
   return null;
 }
 
-export function TunisiaMap() {
-  const [events, setEvents] = useState<MapEvent[]>([]);
-  const [gpsLookup, setGpsLookup] = useState<GpsLookup>({});
-  const [selectedUE, setSelectedUE] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
-  const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+// ── Tower layer ───────────────────────────────────────────────────────────────
+
+function TowerLayer({ towers }: { towers: TowerStat[] }) {
+  const map = useMap();
+  const layersRef = useRef<L.Layer[]>([]);
 
   useEffect(() => {
-    api.get("/operator/cell-gps")
-      .then(({ data }) => setGpsLookup(data))
-      .catch(() => {});
+    layersRef.current.forEach(l => l.remove());
+    layersRef.current = [];
+
+    for (const t of towers) {
+      const color =
+        t.status === "high_risk" ? "#ef4444" :
+        t.status === "congested" ? "#f59e0b" :
+        t.is_active              ? "#22c55e" : "#475569";
+
+      const dotRadius =
+        t.status !== "healthy" ? 5 :
+        t.is_active            ? 5 : 3;
+
+      const dotOpacity =
+        t.status !== "healthy" ? 0.9 :
+        t.is_active            ? 0.7 : 0.3;
+
+      const fillOpacity =
+        t.status !== "healthy" ? 0.07 :
+        t.is_active            ? 0.04 : 0.015;
+
+      const borderOpacity =
+        t.status !== "healthy" ? 0.45 :
+        t.is_active            ? 0.3  : 0.1;
+
+      // Coverage circle — all towers, opacity scales with severity
+      const area = L.circle([t.lat, t.lng] as [number, number], {
+        radius: 450,
+        color,
+        weight: 1,
+        opacity: borderOpacity,
+        fillColor: color,
+        fillOpacity,
+        interactive: false,
+      }).addTo(map);
+      layersRef.current.push(area);
+
+      // Tower dot
+      const dot = L.circleMarker([t.lat, t.lng] as [number, number], {
+        radius: dotRadius,
+        color,
+        weight: 1.5,
+        opacity: dotOpacity,
+        fillColor: color,
+        fillOpacity: dotOpacity,
+      }).addTo(map);
+
+      const statusLabel =
+        t.status === "high_risk" ? "⚠ Weak signal" :
+        t.status === "congested" ? "⚡ Congested"  :
+        t.is_active              ? "✓ Active — device connected" : "· Healthy";
+      const statusColor =
+        t.status === "high_risk" ? "#ef4444" :
+        t.status === "congested" ? "#f59e0b" :
+        t.is_active              ? "#22c55e" : "#64748b";
+
+      dot.bindTooltip(`
+        <div style="background:rgba(5,12,25,0.97);padding:7px 11px;border-radius:9px;border:1px solid ${color}40;min-width:160px">
+          <div style="font-size:11px;font-weight:800;color:#f1f5f9;margin-bottom:4px">Tower #${t.cell_id}</div>
+          <div style="font-size:10px;font-weight:700;color:${statusColor};margin-bottom:5px">${statusLabel}</div>
+          <div style="font-size:10px;color:#64748b">${t.departures} departure${t.departures !== 1 ? "s" : ""} · ${t.arrivals} arrival${t.arrivals !== 1 ? "s" : ""}</div>
+          <div style="font-size:10px;color:#64748b">${(t.congestion_ratio * 100).toFixed(0)}% congestion rate</div>
+          <div style="font-size:10px;color:#64748b">Avg RSRP: ${t.avg_rsrp.toFixed(1)} dBm</div>
+        </div>`, { sticky: true }
+      );
+
+      layersRef.current.push(dot);
+    }
+
+    return () => {
+      layersRef.current.forEach(l => l.remove());
+      layersRef.current = [];
+    };
+  }, [towers, map]);
+
+  return null;
+}
+
+// ── Map centering helper ──────────────────────────────────────────────────────
+
+function FitRegion() {
+  const map = useMap();
+  useEffect(() => { map.setView(RUHR_CENTER, 12); }, [map]);
+  return null;
+}
+
+// ── Sidebar: trip card ────────────────────────────────────────────────────────
+
+function TripCard({ trip, onClick }: { trip: Trip; onClick: () => void }) {
+  const last = trip.path[trip.path.length - 1];
+  const icon = SCENARIO_ICON[trip.scenario] ?? "📡";
+  const name = trip.name ?? trip.scenario;
+  const [hover, setHover] = useState(false);
+
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{ background: "rgba(8,18,36,0.95)", borderRadius: 14, border: `1px solid ${hover ? trip.color + "50" : "rgba(255,255,255,0.06)"}`, padding: "13px 14px", cursor: "pointer", transition: "border-color 0.18s" }}
+    >
+      {/* Name row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: `${trip.color}13`, border: `1.5px solid ${trip.color}25`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>
+          {icon}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#f1f5f9", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>
+          {trip.progress && (
+            <div style={{ marginTop: 5 }}>
+              <div style={{ height: 2.5, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${trip.progress.pct}%`, background: trip.color, borderRadius: 2, transition: "width 1.5s" }} />
+              </div>
+              <div style={{ fontSize: 9, color: "#2d3f5e", marginTop: 2 }}>{trip.progress.pct.toFixed(1)}% of dataset replayed</div>
+            </div>
+          )}
+        </div>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: trip.color, boxShadow: `0 0 8px ${trip.color}`, flexShrink: 0 }} />
+      </div>
+
+      {/* Stats */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", background: "rgba(255,255,255,0.025)", borderRadius: 9, overflow: "hidden", marginBottom: 9 }}>
+        {[
+          { label: "Signal", value: sigLabel(last?.rsrp ?? -140), color: sigColor(last?.rsrp ?? -140) },
+          { label: "Speed", value: `${Math.round(last?.velocity ?? 0)} km/h`, color: "#e2e8f0" },
+          { label: "Tower", value: `#${last?.cell_id ?? "—"}`, color: "#94a3b8" },
+        ].map((s, i) => (
+          <div key={s.label} style={{ padding: "7px 5px", textAlign: "center", borderRight: i < 2 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
+            <div style={{ fontSize: 9, color: "#2d3f5e", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>{s.label}</div>
+            <div style={{ fontSize: 12, fontWeight: 800, color: s.color }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Handover count */}
+      {trip.stats.handover_count > 0 ? (
+        <div style={{ background: "rgba(255,255,255,0.025)", borderRadius: 8, padding: "5px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 10, color: "#3d5475" }}>Tower switches in window</span>
+          <span style={{ fontSize: 14, fontWeight: 900, color: trip.color }}>{trip.stats.handover_count}</span>
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, color: "#1e2d45", textAlign: "center" }}>Monitoring…</div>
+      )}
+    </div>
+  );
+}
+
+// ── Sidebar: detail view ─────────────────────────────────────────────────────
+
+function Timeline({ trip, handovers, onBack }: { trip: Trip; handovers: PathPoint[]; onBack: () => void }) {
+  const icon = SCENARIO_ICON[trip.scenario] ?? "📡";
+  const name = trip.name ?? trip.scenario;
+  const last = trip.path[trip.path.length - 1];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "rgba(8,18,36,0.97)", borderRadius: 16, border: "1px solid rgba(255,255,255,0.07)", overflow: "hidden" }}>
+      <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", alignItems: "center", gap: 10 }}>
+        <button onClick={onBack} style={{ background: "rgba(255,255,255,0.07)", border: "none", color: "#94a3b8", width: 27, height: 27, borderRadius: "50%", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>←</button>
+        <div style={{ width: 9, height: 9, borderRadius: "50%", background: trip.color, boxShadow: `0 0 7px ${trip.color}`, flexShrink: 0 }} />
+        <div style={{ fontSize: 13, fontWeight: 800, color: "#f1f5f9", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{icon} {name}</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+        {[
+          { label: "Switches", value: trip.stats.handover_count, color: "#f1f5f9" },
+          { label: "Signal", value: sigLabel(last?.rsrp ?? -140), color: sigColor(last?.rsrp ?? -140) },
+          { label: "Speed", value: `${Math.round(last?.velocity ?? 0)} km/h`, color: "#e2e8f0" },
+        ].map(s => (
+          <div key={s.label} style={{ padding: "9px 0", textAlign: "center", borderRight: "1px solid rgba(255,255,255,0.03)" }}>
+            <div style={{ fontSize: 16, fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.value}</div>
+            <div style={{ fontSize: 9, color: "#2d3f5e", marginTop: 3 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#2d3f5e", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Recent Switches</div>
+        {handovers.length === 0 ? (
+          <div style={{ textAlign: "center", color: "#1e2d45", fontSize: 12, padding: "24px 0" }}>No switches in current window</div>
+        ) : handovers.map((ho, i) => (
+          <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 3, flexShrink: 0 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: trip.color, border: "2px solid rgba(8,18,36,1)" }} />
+              {i < handovers.length - 1 && <div style={{ width: 1.5, minHeight: 22, background: "rgba(255,255,255,0.04)", marginTop: 3 }} />}
+            </div>
+            <div style={{ flex: 1, paddingBottom: 11 }}>
+              <div style={{ fontSize: 9, color: "#1e2d45", marginBottom: 3 }}>{fmtTime(ho.timestamp)}</div>
+              <div style={{ background: "rgba(255,255,255,0.025)", borderRadius: 8, padding: "7px 10px", border: `1px solid ${trip.color}15` }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#e2e8f0", marginBottom: ho.rsrp_gain !== undefined ? 3 : 0 }}>
+                  Tower #{ho.from_cell} → #{ho.cell_id}
+                </div>
+                {ho.rsrp_gain !== undefined && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: ho.rsrp_gain > 0 ? "#22c55e" : "#ef4444" }}>
+                    {ho.rsrp_gain > 0 ? "+" : ""}{ho.rsrp_gain} dB
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
+
+export function TunisiaMap() {
+  const [trips, setTrips] = useState<Trip[]>([]);
+  const [towers, setTowers] = useState<TowerStat[]>([]);
+  const [selectedUE, setSelectedUE] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState(new Date());
+  const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const towerPollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+
+  const fetchTrips = useCallback(async () => {
+    try {
+      const { data } = await api.get("/operator/dataset-map");
+      if (Array.isArray(data)) { setTrips(data); setLastUpdated(new Date()); }
+    } catch {}
   }, []);
 
-  const fetchEvents = useCallback(async () => {
+  const fetchTowers = useCallback(async () => {
     try {
-      const { data } = await api.get("/operator/map-events");
-      setEvents(data);
-      setLastUpdated(new Date());
+      const { data } = await api.get("/operator/tower-stats");
+      if (Array.isArray(data)) setTowers(data);
     } catch {}
   }, []);
 
   useEffect(() => {
-    fetchEvents();
-    pollRef.current = setInterval(fetchEvents, 1000);
+    fetchTrips();
+    pollRef.current = setInterval(fetchTrips, 1000);
     return () => clearInterval(pollRef.current);
-  }, [fetchEvents]);
+  }, [fetchTrips]);
 
-  // Derived data
-  const latestPerUE = useMemo(() => {
-    const m = new Map<string, MapEvent>();
-    events.forEach(e => { m.set(e.ue_id, e); });
-    return Array.from(m.values());
-  }, [events]);
+  useEffect(() => {
+    fetchTowers();
+    towerPollRef.current = setInterval(fetchTowers, 8000);
+    return () => clearInterval(towerPollRef.current);
+  }, [fetchTowers]);
 
-  const selectedHistory = useMemo(() => {
-    if (!selectedUE) return [];
-    
-    // Sort chronological
-    const sorted = events
-      .filter(e => e.ue_id === selectedUE)
-      .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
-    
-    // Find handover events (where cell_id changes)
-    const hoEvents = [];
-    let prevCell = -1;
-    let baselineRsrp = -140;
+  const handleSelect = useCallback((id: string | null) => {
+    setSelectedUE(prev => (prev === id ? null : id));
+  }, []);
 
-    for (let i = 0; i < sorted.length; i++) {
-      const e = sorted[i];
-      if (e.cell_id !== prevCell) {
-        if (prevCell !== -1) {
-          // Calculate gain: current RSRP minus what it was before handover
-          const gain = e.rsrp - baselineRsrp;
-          hoEvents.push({
-            ...e,
-            prevCell,
-            gain,
-            isAi: e.recommended
-          });
-        }
-        prevCell = e.cell_id;
-      }
-      baselineRsrp = e.rsrp; // keep track of the signal before it changes
-    }
-    return hoEvents.reverse(); // newest first
-  }, [events, selectedUE]);
-
-  const activeCells = useMemo(() => {
-    const map = new Map<number, { lat: number, lng: number }>();
-    latestPerUE.forEach(e => {
-      const gps = gpsLookup[String(e.cell_id)];
-      if (gps) map.set(e.cell_id, { lat: gps.lat, lng: gps.lng });
-    });
-    return map;
-  }, [latestPerUE, gpsLookup]);
+  const selectedTrip = trips.find(t => t.ue_id === selectedUE) ?? null;
+  const handoverHistory = selectedTrip
+    ? selectedTrip.path.filter(p => p.is_handover).slice().reverse()
+    : [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 12 }}>
-      <style>{`
-        @keyframes fadeSignal {
-          0% { opacity: 1; }
-          50% { opacity: 0.2; }
-          100% { opacity: 1; }
-        }
-        .ue-fade {
-          animation: fadeSignal 2s ease-in-out infinite;
-        }
-      `}</style>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 900, color: "#f1f5f9", letterSpacing: -0.5 }}>
-            Live Network Map — Ruhr Region, Germany 🇩🇪
-          </div>
-          <div style={{ fontSize: 13, color: "#475569", marginTop: 2 }}>
-            {latestPerUE.length} active UEs · {activeCells.size} serving cells · Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-          </div>
-        </div>
-      </div>
+    <div style={{ display: "flex", height: "100%", gap: 12 }}>
 
-      {/* Map + Sidebar */}
-      <div style={{ display: "flex", gap: 16, flex: 1, minHeight: 400 }}>
-        
-        {/* MAP PANEL */}
-        <div style={{ flex: 1, borderRadius: 16, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)", position: "relative" }}>
-          <MapContainer center={RUHR_CENTER} zoom={12} style={{ width: "100%", height: "100%", background: "#0d1b2e" }} zoomControl={true} attributionControl={false}>
-            <FitRuhr />
-            <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+      {/* MAP */}
+      <div style={{ flex: 1, borderRadius: 16, overflow: "hidden", border: "1px solid rgba(255,255,255,0.07)", position: "relative" }}>
 
-            {AREAS.map(a => (
-              <CircleMarker key={a.name} center={[a.lat, a.lng]} radius={2} pathOptions={{ color: "#1e3a5f", fillColor: "#334155", fillOpacity: 0.6, weight: 0 }}>
-                <Tooltip permanent direction="top" offset={[0, -4]}>
-                  <span style={{ fontSize: 10, color: "#475569", fontWeight: 700 }}>{a.name}</span>
-                </Tooltip>
-              </CircleMarker>
-            ))}
-
-            {/* ONLY draw lines and markers for UEs. No big cell tower circles. */}
-            {latestPerUE.map((e) => {
-              if (e.ue_lat == null || e.ue_lng == null) return null;
-              const cellPos = activeCells.get(e.cell_id);
-              if (!cellPos) return null;
-              
-              const sc = getScenario(e.scenario);
-              const isSelected = selectedUE === e.ue_id;
-              
-              // Dim others if one is selected
-              const opacity = selectedUE && !isSelected ? 0.2 : 1;
-
-              return (
-                <div key={`render-${e.ue_id}`}>
-                  {/* UE Marker */}
-                  <CircleMarker
-                    center={[e.ue_lat, e.ue_lng]}
-                    radius={isSelected ? 14 : 10}
-                    pathOptions={{
-                      className: "ue-fade",
-                      color: e.recommended ? "#ef4444" : "#ffffff",
-                      fillColor: sc.color,
-                      fillOpacity: opacity,
-                      weight: 3,
-                      opacity: opacity
-                    }}
-                    eventHandlers={{ click: () => setSelectedUE(isSelected ? null : e.ue_id) }}>
-                    <Tooltip permanent direction="bottom" offset={[0, 12]}>
-                      <div style={{ fontFamily: "Inter, sans-serif", textAlign: "center", background: "rgba(15,23,42,0.95)", padding: "4px 8px", borderRadius: 8, border: `2px solid ${sc.color}`, opacity }}>
-                        <div style={{ fontSize: 14, lineHeight: 1 }}>{sc.emoji}</div>
-                        <div style={{ fontSize: 10, fontWeight: 800, color: sc.color, whiteSpace: "nowrap" }}>{sc.label}</div>
-                        <div style={{ fontSize: 9, color: "#94a3b8" }}>Cell {e.cell_id}</div>
-                      </div>
-                    </Tooltip>
-                  </CircleMarker>
-                </div>
-              );
-            })}
-          </MapContainer>
+        {/* Top-left: live badge */}
+        <div style={{ position: "absolute", top: 12, left: 12, zIndex: 1000, display: "flex", alignItems: "center", gap: 7, background: "rgba(5,12,25,0.88)", backdropFilter: "blur(10px)", borderRadius: 8, padding: "5px 11px", border: "1px solid rgba(255,255,255,0.07)" }}>
+          <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 6px #22c55e" }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#e2e8f0" }}>LIVE</span>
+          <span style={{ fontSize: 11, color: "#475569" }}>
+            {trips.length} device{trips.length !== 1 ? "s" : ""} · {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </span>
         </div>
 
-        {/* SIDEBAR */}
-        <div style={{ width: 340, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
-          
-          {selectedUE ? (
-            // ================= HANDOVER HISTORY VIEW =================
-            <div style={{ background: "rgba(13,27,46,0.8)", borderRadius: 16, border: "1px solid rgba(255,255,255,0.06)", height: "100%", display: "flex", flexDirection: "column" }}>
-              {/* Header */}
-              <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 4 }}>Handover History</div>
-                  <div style={{ fontSize: 16, fontWeight: 900, color: "#f1f5f9" }}>{selectedUE}</div>
-                </div>
-                <button onClick={() => setSelectedUE(null)} style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", width: 28, height: 28, borderRadius: "50%", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  ✕
-                </button>
-              </div>
-
-              {/* Timeline */}
-              <div style={{ padding: 20, flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
-                {selectedHistory.length === 0 ? (
-                  <div style={{ textAlign: "center", color: "#64748b", fontSize: 13, marginTop: 40 }}>
-                    Tracking trip...<br/>Waiting for first handover.
-                  </div>
-                ) : (
-                  selectedHistory.map((ho, idx) => (
-                    <div key={`${ho.timestamp}-${idx}`} style={{ position: "relative", paddingLeft: 24 }}>
-                      {/* Timeline dot */}
-                      <div style={{ position: "absolute", left: 0, top: 4, width: 10, height: 10, borderRadius: "50%", background: ho.isAi ? "#22c55e" : "#f59e0b", border: "2px solid #0d1b2e" }} />
-                      {/* Timeline line */}
-                      {idx !== selectedHistory.length - 1 && (
-                        <div style={{ position: "absolute", left: 4, top: 14, bottom: -16, width: 2, background: "rgba(255,255,255,0.06)" }} />
-                      )}
-                      
-                      <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>
-                        {new Date(ho.timestamp || "").toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                      </div>
-                      
-                      <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 12, padding: 12, border: `1px solid ${ho.isAi ? "rgba(34,197,94,0.3)" : "rgba(245,158,11,0.3)"}` }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                          <div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 800, color: "#e2e8f0" }}>
-                              Cell {ho.prevCell} <span style={{ color: "#64748b" }}>→</span> Cell {ho.cell_id}
-                            </div>
-                            <div style={{ fontSize: 11, color: ho.isAi ? "#22c55e" : "#f59e0b", fontWeight: 700, marginTop: 2 }}>
-                              {ho.isAi ? "⚡ Predictive AI Handover" : "⏳ Legacy Reactive Handover"}
-                            </div>
-                          </div>
-                          
-                          {/* Gain Badge */}
-                          <div style={{ background: ho.gain > 0 ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)", color: ho.gain > 0 ? "#22c55e" : "#ef4444", padding: "4px 8px", borderRadius: 8, fontSize: 12, fontWeight: 800 }}>
-                            {ho.gain > 0 ? "+" : ""}{ho.gain.toFixed(1)} dBm Gain
-                          </div>
-                        </div>
-
-                        <div style={{ display: "flex", gap: 16, fontSize: 11 }}>
-                          <div>
-                            <span style={{ color: "#64748b" }}>New Signal:</span> <span style={{ color: "#f1f5f9", fontWeight: 700 }}>{ho.rsrp} dBm</span>
-                          </div>
-                          <div>
-                            <span style={{ color: "#64748b" }}>AI Risk Avoided:</span> <span style={{ color: "#f1f5f9", fontWeight: 700 }}>{(ho.dso1_risk * 100).toFixed(0)}%</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
+        {/* Bottom-left: legend */}
+        <div style={{ position: "absolute", bottom: 28, left: 12, zIndex: 1000, background: "rgba(5,12,25,0.88)", backdropFilter: "blur(10px)", borderRadius: 10, padding: "10px 13px", border: "1px solid rgba(255,255,255,0.07)" }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "#2d3f5e", textTransform: "uppercase", letterSpacing: 1, marginBottom: 7 }}>Legend</div>
+          {[
+            { dot: <div style={{ width: 11, height: 11, borderRadius: "50%", background: "#22d3ee", boxShadow: "0 0 6px #22d3ee" }} />, text: "Live device (click to inspect)" },
+            { dot: <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 4px #22c55e" }} />, text: "Tower — device connected" },
+            { dot: <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#475569" }} />, text: "Tower — healthy" },
+            { dot: <div style={{ width: 9, height: 9, borderRadius: "50%", background: "#f59e0b" }} />, text: "Tower — congested" },
+            { dot: <div style={{ width: 9, height: 9, borderRadius: "50%", background: "#ef4444" }} />, text: "Tower — weak signal" },
+          ].map(({ dot, text }) => (
+            <div key={text} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "#64748b", marginBottom: 5 }}>
+              {dot}<span>{text}</span>
             </div>
-          ) : (
-            // ================= ALL UEs VIEW =================
-            <>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 1.5 }}>
-                Active Trips ({latestPerUE.length})
-              </div>
-              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4 }}>
-                Click any user to view their Handover History.
-              </div>
-              
-              {latestPerUE.map(e => {
-                const sc = getScenario(e.scenario);
-                return (
-                  <div key={e.ue_id}
-                    onClick={() => setSelectedUE(e.ue_id)}
-                    style={{
-                      padding: "14px 16px", borderRadius: 14, cursor: "pointer",
-                      background: "rgba(13,27,46,0.8)", border: "1px solid rgba(255,255,255,0.06)",
-                      transition: "all 0.2s",
-                    }}
-                    onMouseEnter={(ev) => ev.currentTarget.style.borderColor = sc.color}
-                    onMouseLeave={(ev) => ev.currentTarget.style.borderColor = "rgba(255,255,255,0.06)"}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                      <div style={{ width: 40, height: 40, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", background: `${sc.color}20`, fontSize: 22 }}>
-                        {sc.emoji}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 800, fontSize: 13, color: "#f1f5f9" }}>{sc.label}</div>
-                        <div style={{ fontSize: 10, color: "#64748b", fontFamily: "monospace" }}>{e.ue_id}</div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", justifyContent: "space-between", background: "rgba(255,255,255,0.03)", padding: "8px 12px", borderRadius: 8 }}>
-                      <div>
-                        <div style={{ fontSize: 9, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5 }}>Serving Cell</div>
-                        <div style={{ fontSize: 13, fontWeight: 800, color: "#e2e8f0" }}>{e.cell_id}</div>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 9, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5 }}>RSRP</div>
-                        <div style={{ fontSize: 13, fontWeight: 800, color: e.rsrp > -95 ? "#22c55e" : "#ef4444" }}>{e.rsrp} dBm</div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </>
+          ))}
+          {towers.length > 0 && (
+            <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.05)", fontSize: 10, color: "#2d3f5e" }}>
+              {towers.filter(t => t.is_active).length} active · {towers.filter(t => t.status !== "healthy").length} problem{towers.filter(t => t.status !== "healthy").length !== 1 ? "s" : ""} of {towers.length}
+            </div>
           )}
         </div>
+
+        <MapContainer
+          center={RUHR_CENTER}
+          zoom={12}
+          style={{ width: "100%", height: "100%", background: "#050d1a" }}
+          zoomControl
+          attributionControl={false}
+        >
+          <FitRegion />
+          <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+          <TowerLayer towers={towers} />
+          <AnimatedLayer trips={trips} selectedUE={selectedUE} onSelect={handleSelect} />
+        </MapContainer>
+      </div>
+
+      {/* SIDEBAR */}
+      <div style={{ width: 288, display: "flex", flexDirection: "column", gap: 10, minHeight: 0, overflowY: selectedUE ? "hidden" : "auto" }}>
+        {selectedUE && selectedTrip ? (
+          <Timeline trip={selectedTrip} handovers={handoverHistory} onBack={() => setSelectedUE(null)} />
+        ) : (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 2 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#2d3f5e", textTransform: "uppercase", letterSpacing: 1.2 }}>Active Devices</div>
+              <div style={{ fontSize: 10, color: "#1a2840" }}>{lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</div>
+            </div>
+            {trips.length === 0 ? (
+              <div style={{ textAlign: "center", color: "#1e2d45", fontSize: 13, padding: "48px 0" }}>Waiting for live data…</div>
+            ) : (
+              trips.map(trip => <TripCard key={trip.ue_id} trip={trip} onClick={() => handleSelect(trip.ue_id)} />)
+            )}
+          </>
+        )}
       </div>
     </div>
   );

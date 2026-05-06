@@ -10,6 +10,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { OperatorPage } from "./pages/OperatorPage";
 import { HandoverHistoryPage } from "./pages/HandoverHistoryPage";
 import { ScientistPage } from "./pages/ScientistPage";
+import { MLEngineerPage } from "./pages/MLEngineerPage";
 
 const theme = createTheme({
   palette: {
@@ -75,6 +76,7 @@ function RoleRedirect() {
   if (!token || !role) return <Navigate to="/login" replace />;
   if (role === "admin") return <Navigate to="/app/admin" replace />;
   if (role === "network_operator") return <Navigate to="/app/operator" replace />;
+  if (role === "ml_engineer") return <Navigate to="/app/mlops" replace />;
   return <Navigate to="/app/scientist" replace />;
 }
 
@@ -89,11 +91,12 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/app" element={<Layout />}>
               <Route index element={<RoleRedirect />} />
-              <Route path="home" element={<ProtectedRoute allowedRoles={["admin","network_operator","data_scientist"]}><HomePage /></ProtectedRoute>} />
+              <Route path="home" element={<ProtectedRoute allowedRoles={["admin","network_operator","data_scientist","ml_engineer"]}><HomePage /></ProtectedRoute>} />
               <Route path="admin" element={<ProtectedRoute allowedRoles={["admin"]}><AdminPage /></ProtectedRoute>} />
               <Route path="operator" element={<ProtectedRoute allowedRoles={["admin","network_operator"]}><OperatorPage /></ProtectedRoute>} />
               <Route path="operator/handovers" element={<ProtectedRoute allowedRoles={["admin","network_operator"]}><HandoverHistoryPage /></ProtectedRoute>} />
               <Route path="scientist" element={<ProtectedRoute allowedRoles={["admin","data_scientist"]}><ScientistPage /></ProtectedRoute>} />
+              <Route path="mlops" element={<ProtectedRoute allowedRoles={["admin","ml_engineer"]}><MLEngineerPage /></ProtectedRoute>} />
             </Route>
           </Routes>
         </BrowserRouter>

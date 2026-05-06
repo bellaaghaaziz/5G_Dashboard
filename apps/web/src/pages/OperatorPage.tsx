@@ -1,146 +1,143 @@
-import CellTowerRoundedIcon from "@mui/icons-material/CellTowerRounded";
-import PauseRoundedIcon from "@mui/icons-material/PauseRounded";
-import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
+import RouterRoundedIcon from "@mui/icons-material/RouterRounded";
+import DirectionsCarRoundedIcon from "@mui/icons-material/DirectionsCarRounded";
+import PsychologyRoundedIcon from "@mui/icons-material/PsychologyRounded";
 import SignalCellularAltRoundedIcon from "@mui/icons-material/SignalCellularAltRounded";
-import SpeedRoundedIcon from "@mui/icons-material/SpeedRounded";
-import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
-import { Alert, Box, Button, ButtonGroup, Card, CardContent, Chip, IconButton, Stack, Typography } from "@mui/material";
+import TrafficRoundedIcon from "@mui/icons-material/TrafficRounded";
+import { Box, Card, CardContent, Stack, Typography } from "@mui/material";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TunisiaMap } from "../components/TunisiaMap";
 import { api } from "../api/client";
 
-type HoPolicyComparison = {
-  reactiveLegacyHoCount: number;
-  predictiveHoCount: number;
-  avgRsrpAtLegacyHoDbm: number | null;
-  avgRsrpAtPredictiveHoDbm: number | null;
-  signalHeadroomDb: number | null;
-  legacyRsrpFloorDbm: number;
-  predictiveWhileAboveLegacyFloor: number;
-  narrative: string;
+type DatasetOverview = {
+  kpis: {
+    totalHandovers: number;
+    mobilityHandovers: number;
+    congestionHandovers: number;
+    avgRsrpGain: number;
+    activeDevices: number;
+    replayProgress: number;
+    aiProactiveCount: number;
+    aiProactiveRate: number;
+    aiAvgHeadroomDb: number;
+  };
+  devices: Array<{
+    name: string;
+    color: string;
+    scenario: string;
+    currentRsrp: number;
+    currentVelocity: number;
+    progress: { cursor: number; total: number; pct: number } | null;
+  }>;
 };
 
-type Overview = {
-  kpis: {
-    recentPredictions15m: number;
-    handoverRecommendationsLastHour: number;
-    avgLatencyMs: number;
-    highRiskPredictionsLastHour: number;
-    hoSuccessRate: number;
-  };
-  hoPolicyComparison?: HoPolicyComparison;
-  alerts: { id: string; severity: "high" | "medium"; message: string }[];
-};
+function KpiCard({ label, sublabel, value, unit, icon, color }: {
+  label: string; sublabel: string; value: string | number;
+  unit?: string; icon: React.ReactNode; color: string;
+}) {
+  return (
+    <Card sx={{ flex: 1, background: "rgba(10,20,40,0.7)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 3 }}>
+      <CardContent sx={{ p: "14px !important" }}>
+        <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
+          <Box>
+            <Typography sx={{ fontSize: 10, fontWeight: 700, color: "text.secondary", textTransform: "uppercase", letterSpacing: 0.8, mb: 0.4 }}>
+              {label}
+            </Typography>
+            <Stack direction="row" alignItems="baseline" spacing={0.5}>
+              <Typography sx={{ fontSize: 26, fontWeight: 900, lineHeight: 1, color: "#f1f5f9" }}>{value}</Typography>
+              {unit && <Typography sx={{ fontSize: 12, color: "text.secondary" }}>{unit}</Typography>}
+            </Stack>
+            <Typography sx={{ fontSize: 10, color: "text.disabled", mt: 0.4 }}>{sublabel}</Typography>
+          </Box>
+          <Box sx={{ width: 34, height: 34, borderRadius: 2, display: "flex", alignItems: "center", justifyContent: "center", background: `${color}1a`, color, flexShrink: 0, mt: 0.5 }}>
+            {icon}
+          </Box>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+}
 
 export function OperatorPage() {
-  const [overview, setOverview] = useState<Overview | null>(null);
-  const [playing, setPlaying] = useState(true);
-  const [speed, setSpeed] = useState(1);
+  const [overview, setOverview] = useState<DatasetOverview | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const fetchOverview = useCallback(async () => {
     try {
-      const { data } = await api.get("/operator/overview");
+      const { data } = await api.get("/operator/dataset-overview");
       setOverview(data);
     } catch {}
   }, []);
 
   useEffect(() => {
     fetchOverview();
-    timerRef.current = setInterval(fetchOverview, 5000);
+    timerRef.current = setInterval(fetchOverview, 3000);
     return () => clearInterval(timerRef.current);
   }, [fetchOverview]);
 
-  const togglePlay = async () => {
-    const next = playing ? "paused" : "playing";
-    try { await api.post("/operator/playback", { status: next }); } catch {}
-    setPlaying(!playing);
-  };
-
-  const changeSpeed = async (s: number) => {
-    setSpeed(s);
-    try { await api.post("/operator/playback", { speed: s }); } catch {}
-  };
-
   const kpi = overview?.kpis;
-  const pol = overview?.hoPolicyComparison;
-  const alerts = overview?.alerts ?? [];
-
-  const kpiCards = [
-    { label: "Predictions (15m)", value: kpi?.recentPredictions15m ?? 0, gradient: "linear-gradient(135deg,#22d3ee,#3b82f6)", icon: <SignalCellularAltRoundedIcon /> },
-    { label: "Handover Recs (1h)", value: kpi?.handoverRecommendationsLastHour ?? 0, gradient: "linear-gradient(135deg,#a855f7,#6366f1)", icon: <CellTowerRoundedIcon /> },
-    { label: "HO Success Rate", value: (kpi?.hoSuccessRate ?? 0) + "%", gradient: "linear-gradient(135deg,#10b981,#059669)", icon: <SignalCellularAltRoundedIcon /> },
-    { label: "Avg Latency (ms)", value: kpi?.avgLatencyMs?.toFixed(1) ?? "0", gradient: "linear-gradient(135deg,#f59e0b,#ef4444)", icon: <SpeedRoundedIcon /> },
-    { label: "High Risk (1h)", value: kpi?.highRiskPredictionsLastHour ?? 0, gradient: "linear-gradient(135deg,#ef4444,#dc2626)", icon: <WarningAmberRoundedIcon /> },
-  ];
+  const gainPositive = (kpi?.avgRsrpGain ?? 0) >= 0;
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2, height: "calc(100vh - 120px)" }}>
-      {/* Header row */}
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, height: "calc(100vh - 112px)" }}>
+
+      {/* Header */}
       <Stack direction="row" justifyContent="space-between" alignItems="center">
         <Box>
-          <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5 }}>Network Operations Center</Typography>
-          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.3 }}>Real-time AI handover intelligence · Tunisia 5G Network</Typography>
+          <Typography variant="h5" sx={{ fontWeight: 900, letterSpacing: -0.5, color: "#f1f5f9" }}>
+            Network Operations Center
+          </Typography>
+          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.2 }}>
+            Real 5G measurements from the Ruhr region of Germany — replaying at 30× speed
+          </Typography>
         </Box>
-        {/* Playback controls */}
-        <Stack direction="row" spacing={1.5} alignItems="center">
-          <Stack direction="row" spacing={0.5} alignItems="center">
-            <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "#a855f7" }} />
-            <Typography variant="caption" sx={{ fontWeight: 700, color: "#a855f7" }}>REAL DATA</Typography>
-          </Stack>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: 2, px: 1.5, py: 0.75 }}>
+          <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: "#22c55e", boxShadow: "0 0 6px #22c55e" }} />
+          <Typography variant="caption" sx={{ fontWeight: 700, color: "#22c55e" }}>LIVE</Typography>
         </Stack>
       </Stack>
 
-      {/* KPI cards */}
-      <Stack direction="row" spacing={2}>
-        {kpiCards.map(k => (
-          <Card key={k.label} sx={{ flex: 1, background: "rgba(13,27,46,0.8)", border: "1px solid rgba(255,255,255,0.06)" }}>
-            <CardContent sx={{ p: "14px !important", display: "flex", alignItems: "center", gap: 1.5 }}>
-              <Box sx={{ width: 36, height: 36, borderRadius: 1.5, display: "flex", alignItems: "center", justifyContent: "center", background: k.gradient, color: "#fff", flexShrink: 0 }}>
-                {k.icon}
-              </Box>
-              <Box>
-                <Typography variant="h5" sx={{ fontWeight: 900, lineHeight: 1 }}>{k.value}</Typography>
-                <Typography variant="caption" sx={{ color: "text.secondary", fontSize: 11 }}>{k.label}</Typography>
-              </Box>
-            </CardContent>
-          </Card>
-        ))}
+      {/* KPI Cards — real data from dataset replay */}
+      <Stack direction="row" spacing={1.5}>
+        <KpiCard
+          label="Tower Switches"
+          sublabel="total handovers logged so far"
+          value={kpi?.totalHandovers ?? 0}
+          icon={<RouterRoundedIcon sx={{ fontSize: 18 }} />}
+          color="#a855f7"
+        />
+        <KpiCard
+          label="Moving"
+          sublabel="switches while device in motion"
+          value={kpi?.mobilityHandovers ?? 0}
+          icon={<DirectionsCarRoundedIcon sx={{ fontSize: 18 }} />}
+          color="#22d3ee"
+        />
+        <KpiCard
+          label="Congestion"
+          sublabel="switches due to tower overload"
+          value={kpi?.congestionHandovers ?? 0}
+          icon={<TrafficRoundedIcon sx={{ fontSize: 18 }} />}
+          color="#f59e0b"
+        />
+        <KpiCard
+          label="Avg Signal Change"
+          sublabel="RSRP gain/loss per tower switch"
+          value={`${gainPositive ? "+" : ""}${kpi?.avgRsrpGain ?? 0}`}
+          unit="dB"
+          icon={<SignalCellularAltRoundedIcon sx={{ fontSize: 18 }} />}
+          color={gainPositive ? "#22c55e" : "#ef4444"}
+        />
+        <KpiCard
+          label="AI Proactive Rate"
+          sublabel={`${kpi?.aiProactiveCount ?? 0} switches caught early · avg +${kpi?.aiAvgHeadroomDb ?? 0} dB headroom`}
+          value={kpi?.aiProactiveRate ?? 0}
+          unit="%"
+          icon={<PsychologyRoundedIcon sx={{ fontSize: 18 }} />}
+          color="#22d3ee"
+        />
       </Stack>
 
-      {pol && (pol.reactiveLegacyHoCount > 0 || pol.predictiveHoCount > 0) && (
-        <Card sx={{ background: "linear-gradient(90deg, rgba(127,29,29,0.25), rgba(30,58,138,0.35))", border: "1px solid rgba(248,113,113,0.2)" }}>
-          <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }} justifyContent="space-between">
-              <Box>
-                <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#fecaca", letterSpacing: 0.3 }}>
-                  Predictive vs legacy (live sim)
-                </Typography>
-                <Typography variant="caption" sx={{ color: "#cbd5e1", display: "block", mt: 0.5, maxWidth: 720 }}>
-                  {pol.narrative}
-                </Typography>
-              </Box>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                <Chip size="small" label={`Legacy HO: ${pol.reactiveLegacyHoCount}`} sx={{ fontWeight: 700, color: "#fecaca", borderColor: "rgba(248,113,113,0.4)" }} variant="outlined" />
-                <Chip size="small" label={`Predictive HO: ${pol.predictiveHoCount}`} sx={{ fontWeight: 700, color: "#67e8f9", borderColor: "rgba(34,211,238,0.4)" }} variant="outlined" />
-                <Chip size="small" label={`RSRP legacy avg: ${pol.avgRsrpAtLegacyHoDbm ?? "—"} dBm`} sx={{ fontWeight: 600, color: "#e2e8f0" }} variant="outlined" />
-                <Chip size="small" label={`RSRP predictive avg: ${pol.avgRsrpAtPredictiveHoDbm ?? "—"} dBm`} sx={{ fontWeight: 600, color: "#6ee7b7" }} variant="outlined" />
-                <Chip size="small" label={`Headroom: ${pol.signalHeadroomDb != null ? `+${pol.signalHeadroomDb} dB` : "—"}`} sx={{ fontWeight: 800, color: "#fde047" }} variant="outlined" />
-                <Chip size="small" label={`Proactive (above ${pol.legacyRsrpFloorDbm} dBm): ${pol.predictiveWhileAboveLegacyFloor}`} sx={{ fontWeight: 600, color: "#a5b4fc" }} variant="outlined" />
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Alerts */}
-      {alerts.slice(0, 2).map(a => (
-        <Alert key={a.id} severity={a.severity === "high" ? "error" : "warning"} sx={{ py: 0.5, background: "rgba(13,27,46,0.8)", border: `1px solid ${a.severity === "high" ? "rgba(239,68,68,0.2)" : "rgba(245,158,11,0.2)"}` }}>
-          {a.message}
-        </Alert>
-      ))}
-
-      {/* Map — takes remaining height */}
+      {/* Map — fills all remaining space */}
       <Box sx={{ flex: 1, minHeight: 0 }}>
         <TunisiaMap />
       </Box>
