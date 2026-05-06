@@ -1,0 +1,15 @@
+creation_timestamp: 1777232454851
+current_stage: None
+deployment_job_state: null
+description: null
+last_updated_timestamp: 1777232454851
+model_id: m-81945a476e4a48a5829a4cd3f3345e57
+name: 5G-DSO4-Controller
+run_id: 9cc273ff06004eb69beb7587fe4a316d
+run_link: null
+source: models:/m-81945a476e4a48a5829a4cd3f3345e57
+status: READY
+status_message: null
+storage_location: file:C:/Users/azizb/5G_Dashboard/mlruns/133665320157352481/models/m-81945a476e4a48a5829a4cd3f3345e57/artifacts
+user_id: null
+version: 2

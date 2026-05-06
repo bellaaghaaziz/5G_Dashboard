@@ -1,0 +1,23 @@
+{
+  "dso1": {
+    "roc_auc": 0.8921,
+    "pr_auc": 0.7919,
+    "mcc": 0.572,
+    "accuracy": 0.8206,
+    "f1": 0.8179
+  },
+  "dso3": {
+    "n_clusters": 4,
+    "inertia": 1137394.18
+  },
+  "dso4": {
+    "roc_auc": 0.9788,
+    "pr_auc": 0.9824,
+    "mcc": 0.826,
+    "kappa": 0.8212,
+    "accuracy": 0.9117,
+    "ho_recall": 0.8799,
+    "stay_recall": 0.9569,
+    "threshold": 0.82
+  }
+}

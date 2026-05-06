@@ -35,15 +35,21 @@ class DriftDetector:
             f: deque(maxlen=WINDOW_SIZE) for f in self.MONITORED_FEATURES
         }
         self._baseline: dict | None = None
+        self._baseline_mtime = 0
         self._load_baseline()
 
     def _load_baseline(self):
+        """Load or reload baseline if file was updated on disk."""
         if BASELINE_PATH.exists():
-            try:
-                self._baseline = json.loads(BASELINE_PATH.read_text())
-                log.info("Drift baseline loaded from %s", BASELINE_PATH)
-            except Exception:
-                self._baseline = None
+            mtime = BASELINE_PATH.stat().st_mtime
+            if mtime > self._baseline_mtime:
+                try:
+                    self._baseline = json.loads(BASELINE_PATH.read_text())
+                    self._baseline_mtime = mtime
+                    self.reset_windows()
+                    log.info("Loaded/reloaded drift baseline from disk (mtime %.1f).", mtime)
+                except Exception as e:
+                    log.error("Failed to load baseline: %s", e)
 
     def set_baseline_from_dataframe(self, df):
         """Compute and save baseline statistics from training data."""
@@ -70,6 +76,12 @@ class DriftDetector:
         BASELINE_PATH.parent.mkdir(parents=True, exist_ok=True)
         BASELINE_PATH.write_text(json.dumps(baseline, indent=2))
         log.info("Drift baseline saved with %d features", len(baseline))
+
+    def reset_windows(self):
+        """Clear the rolling windows after a retrain."""
+        self._window = {
+            f: deque(maxlen=WINDOW_SIZE) for f in self.MONITORED_FEATURES
+        }
 
     def record(self, inputs: dict):
         """Record a prediction's input features into the rolling window."""
@@ -100,6 +112,7 @@ class DriftDetector:
 
     def get_drift_report(self) -> dict:
         """Return drift analysis for all monitored features."""
+        self._load_baseline()
         if self._baseline is None:
             return {
                 "status": "no_baseline",

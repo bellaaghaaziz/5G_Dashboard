@@ -118,6 +118,7 @@ def _run_training():
             from sklearn.preprocessing import StandardScaler
             from xgboost import XGBClassifier
             from sklearn.metrics import roc_auc_score, matthews_corrcoef
+            from sklearn.linear_model import LogisticRegression
 
             avail_feats = [f for f in dso1_features if f in df.columns]
             X1 = df[avail_feats].fillna(0).values
@@ -126,17 +127,24 @@ def _run_training():
             scaler1 = StandardScaler().fit(X1)
             X1s = scaler1.transform(X1)
 
-            xgb1 = XGBClassifier(
-                n_estimators=200, max_depth=6, learning_rate=0.1,
-                use_label_encoder=False, eval_metric="logloss", random_state=42
-            )
-            xgb1.fit(X1s, y1)
+            try:
+                xgb1 = XGBClassifier(
+                    n_estimators=200, max_depth=6, learning_rate=0.1,
+                    objective="binary:logistic",
+                    use_label_encoder=False, eval_metric="logloss", random_state=42
+                )
+                xgb1.fit(X1s, y1)
+                model_dso1 = xgb1
+            except Exception as e:
+                log.warning("DSO1 XGB training failed, falling back to LogisticRegression: %s", e)
+                model_dso1 = LogisticRegression(max_iter=1000, random_state=42)
+                model_dso1.fit(X1s, y1)
 
-            y1_prob = xgb1.predict_proba(X1s)[:, 1]
+            y1_prob = model_dso1.predict_proba(X1s)[:, 1]
             dso1_auc = float(roc_auc_score(y1, y1_prob))
 
             joblib.dump(scaler1, "scaler_dso1.pkl")
-            joblib.dump(xgb1, "model_dso1_xgb.pkl")
+            joblib.dump(model_dso1, "model_dso1_xgb.pkl")
             _update("DSO1 trained (AUC=%.4f)" % dso1_auc, 55)
         else:
             dso1_auc = old_metrics.get("dso1", {}).get("roc_auc", 0)
@@ -148,9 +156,10 @@ def _run_training():
         dso4_features = feature_lists.get("dso4_features", [])
         if dso4_features and "is_ho" in df.columns:
             from xgboost import XGBClassifier
-            from sklearn.calibration import CalibratedClassifierCV
             from sklearn.metrics import roc_auc_score, matthews_corrcoef
             from sklearn.model_selection import train_test_split
+            from src.calibration import IsotonicCalibrator
+            from sklearn.linear_model import LogisticRegression
 
             avail_feats = [f for f in dso4_features if f in df.columns]
             X4 = df[avail_feats].fillna(0).values
@@ -160,15 +169,23 @@ def _run_training():
                 X4, y4, test_size=0.2, random_state=42, stratify=y4
             )
 
-            xgb4 = XGBClassifier(
-                n_estimators=300, max_depth=7, learning_rate=0.1,
-                use_label_encoder=False, eval_metric="logloss", random_state=42
-            )
-            xgb4.fit(X_train, y_train)
-
-            # Calibrate
-            cal4 = CalibratedClassifierCV(xgb4, cv=3, method="isotonic")
-            cal4.fit(X_train, y_train)
+            try:
+                xgb4 = XGBClassifier(
+                    n_estimators=300, max_depth=7, learning_rate=0.1,
+                    objective="binary:logistic",
+                    use_label_encoder=False, eval_metric="logloss", random_state=42
+                )
+                xgb4.fit(X_train, y_train)
+                # Calibrate with project-compatible wrapper
+                cal4 = IsotonicCalibrator(xgb4)
+                cal4.fit(X_val, y_val)
+                model_dso4 = xgb4
+            except Exception as e:
+                log.warning("DSO4 XGB training failed, falling back to LogisticRegression: %s", e)
+                model_dso4 = LogisticRegression(max_iter=1200, random_state=42)
+                model_dso4.fit(X_train, y_train)
+                cal4 = IsotonicCalibrator(model_dso4)
+                cal4.fit(X_val, y_val)
 
             y4_prob = cal4.predict_proba(X_val)[:, 1]
             dso4_auc = float(roc_auc_score(y_val, y4_prob))
@@ -183,7 +200,7 @@ def _run_training():
             y4_pred = (y4_prob >= threshold).astype(int)
             dso4_mcc = float(matthews_corrcoef(y_val, y4_pred))
 
-            joblib.dump(xgb4, "model_dso4_controller.pkl")
+            joblib.dump(model_dso4, "model_dso4_controller.pkl")
             joblib.dump(cal4, "model_dso4_calibrated.pkl")
             joblib.dump(threshold, "model_dso4_threshold.pkl")
 

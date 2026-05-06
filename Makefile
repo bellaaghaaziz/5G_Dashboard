@@ -57,10 +57,18 @@ help:
 	@echo "  $(GREEN)Monitoring$(RESET)"
 	@echo "    make elk-up         Start Elasticsearch + Kibana + Filebeat"
 	@echo "    make elk-down       Stop ELK stack"
+	@echo "    make perf-test      Run inference contract + latency guardrail tests"
 	@echo ""
 	@echo "  $(GREEN)Platform$(RESET)"
 	@echo "    make platform-up    Start NestJS microservices + React app"
 	@echo "    make platform-down  Stop platform microservices"
+	@echo "    make k8s-apply      Apply Kubernetes stack (inference + Prometheus + Grafana)"
+	@echo "    make k8s-delete     Delete Kubernetes stack manifests"
+	@echo "    make tf-fmt         Terraform fmt (infra/terraform)"
+	@echo "    make tf-validate    Terraform init -backend=false + validate"
+	@echo "    make tf-plan        Terraform init + plan"
+	@echo "    make tf-apply       Terraform init + apply"
+	@echo "    make tf-destroy     Terraform init + destroy"
 	@echo ""
 	@echo "  $(GREEN)Utilities$(RESET)"
 	@echo "    make install        Install Python dependencies"
@@ -90,7 +98,7 @@ evaluate:
 .PHONY: test
 test:
 	@echo "$(CYAN)▶ Running model validation suite…$(RESET)"
-	$(PYTHON) test_models.py
+	$(PYTHON) -m pytest -q
 	@echo "$(GREEN)✅ All tests passed$(RESET)"
 
 # ─── FastAPI ──────────────────────────────────────────────────────────────────
@@ -166,6 +174,75 @@ platform-up:
 .PHONY: platform-down
 platform-down:
 	docker compose -f docker-compose.platform.yml down
+
+# ─── End-to-end MLOps pipeline (data → train → eval → gate → mlflow) ──────────
+.PHONY: mlops-pipeline
+mlops-pipeline:
+	@echo "$(CYAN)▶ Running end-to-end MLOps pipeline (with quality gate)…$(RESET)"
+	$(PYTHON) -m mlops.pipeline_runner --data-path DATASET/df_master_engineered.parquet --with-mlflow --promote
+
+# ─── Performance & Contract Checks ────────────────────────────────────────────
+.PHONY: perf-test
+perf-test:
+	@echo "$(CYAN)▶ Running inference contract + performance tests…$(RESET)"
+	$(PYTHON) -m pytest -q tests/test_inference_contract_perf.py
+
+# ─── Kubernetes Ops ───────────────────────────────────────────────────────────
+.PHONY: k8s-apply
+k8s-apply:
+	@echo "$(CYAN)▶ Applying Kubernetes manifests…$(RESET)"
+	kubectl apply -f infra/k8s/namespace.yaml
+	kubectl apply -f infra/k8s/inference-configmap.yaml
+	kubectl apply -f infra/k8s/inference-deployment.yaml
+	kubectl apply -f infra/k8s/inference-service.yaml
+	kubectl apply -f infra/k8s/inference-hpa.yaml
+	kubectl apply -f infra/k8s/prometheus-deployment.yaml
+	kubectl apply -f infra/k8s/prometheus-service.yaml
+	kubectl apply -f infra/k8s/grafana-deployment.yaml
+	kubectl apply -f infra/k8s/grafana-service.yaml
+
+.PHONY: k8s-delete
+k8s-delete:
+	@echo "$(CYAN)▶ Deleting Kubernetes manifests…$(RESET)"
+	-kubectl delete -f infra/k8s/grafana-service.yaml
+	-kubectl delete -f infra/k8s/grafana-deployment.yaml
+	-kubectl delete -f infra/k8s/prometheus-service.yaml
+	-kubectl delete -f infra/k8s/prometheus-deployment.yaml
+	-kubectl delete -f infra/k8s/inference-hpa.yaml
+	-kubectl delete -f infra/k8s/inference-service.yaml
+	-kubectl delete -f infra/k8s/inference-deployment.yaml
+	-kubectl delete -f infra/k8s/inference-configmap.yaml
+	-kubectl delete -f infra/k8s/namespace.yaml
+
+# ─── Terraform Ops ────────────────────────────────────────────────────────────
+.PHONY: tf-fmt
+tf-fmt:
+	@echo "$(CYAN)▶ Terraform fmt…$(RESET)"
+	terraform -chdir=infra/terraform fmt -recursive
+
+.PHONY: tf-validate
+tf-validate:
+	@echo "$(CYAN)▶ Terraform validate…$(RESET)"
+	terraform -chdir=infra/terraform init -backend=false
+	terraform -chdir=infra/terraform validate
+
+.PHONY: tf-plan
+tf-plan:
+	@echo "$(CYAN)▶ Terraform plan…$(RESET)"
+	terraform -chdir=infra/terraform init
+	terraform -chdir=infra/terraform plan
+
+.PHONY: tf-apply
+tf-apply:
+	@echo "$(CYAN)▶ Terraform apply…$(RESET)"
+	terraform -chdir=infra/terraform init
+	terraform -chdir=infra/terraform apply -auto-approve
+
+.PHONY: tf-destroy
+tf-destroy:
+	@echo "$(CYAN)▶ Terraform destroy…$(RESET)"
+	terraform -chdir=infra/terraform init
+	terraform -chdir=infra/terraform destroy -auto-approve
 
 # ─── Full pipeline ────────────────────────────────────────────────────────────
 .PHONY: all

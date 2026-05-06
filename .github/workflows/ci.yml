@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  python-tests:
+    name: Python (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          pytest -q
+
+  mlops-gate-smoke:
+    name: MLOps (quality gate smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pipeline runner (no promote)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          if [ -f "DATASET/df_master_engineered.parquet" ]; then
+            python -m mlops.pipeline_runner --data-path DATASET/df_master_engineered.parquet --model-dir . --min-dso4-auc 0.50 --min-dso4-mcc 0.10
+          else
+            echo "Dataset not present in CI checkout; skipping full training smoke."
+          fi
+
+  inference-contract-performance:
+    name: Inference contract + performance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          if [ -f "requirements-dev.txt" ]; then pip install -r requirements-dev.txt; fi
+
+      - name: Run inference contract/perf tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          pytest -q tests/test_inference_contract_perf.py
+
+  node-build:
+    name: Node (build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install deps (workspace)
+        run: npm ci
+
+      - name: Build backend services
+        run: |
+          npm run -w services/user-service build
+          npm run -w services/api-gateway build
+          npm run -w services/dashboard-service build
+          npm run -w services/prediction-service build
+
+      - name: Build web
+        run: npm run -w apps/web build
+

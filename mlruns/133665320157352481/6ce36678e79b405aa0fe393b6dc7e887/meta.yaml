@@ -1,0 +1,14 @@
+artifact_uri: file:C:/Users/azizb/5G_Dashboard/mlruns/133665320157352481/6ce36678e79b405aa0fe393b6dc7e887/artifacts
+end_time: 1778064908550
+entry_point_name: ''
+experiment_id: '133665320157352481'
+lifecycle_stage: active
+run_id: 6ce36678e79b405aa0fe393b6dc7e887
+run_name: v9-1778064883
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1778064885125
+status: 3
+tags: []
+user_id: azizb

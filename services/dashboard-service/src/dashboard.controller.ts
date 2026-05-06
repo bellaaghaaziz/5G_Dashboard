@@ -42,14 +42,34 @@ export class DashboardController {
     return this.dashboardService.getCellGps();
   }
 
+  @Get("operator/dataset-map")
+  getDatasetMapState() {
+    return this.dashboardService.getDatasetMapState();
+  }
+
   @Get("operator/dataset-handovers")
-  async getDatasetHandovers() {
+  getDatasetHandovers() {
     return this.dashboardService.getDatasetHandovers();
+  }
+
+  @Get("operator/dataset-overview")
+  getDatasetOverview() {
+    return this.dashboardService.getDatasetOverview();
+  }
+
+  @Get("operator/tower-stats")
+  getTowerStats() {
+    return this.dashboardService.getTowerStats();
   }
 
   @Get("operator/dataset-info")
   async getDatasetInfo() {
     return this.dashboardService.getDatasetInfo();
+  }
+
+  @Get("operator/trip-paths")
+  getTripPaths() {
+    return this.dashboardService.getTripPaths();
   }
 
   @Get("operator/handover-log")

@@ -1,0 +1,41 @@
+{
+  "created_at_utc": "2026-05-06T13:22:22Z",
+  "git_commit": "7acaf99",
+  "python_version": "3.14.0",
+  "cwd": "C:\\Users\\azizb\\5G_Dashboard",
+  "data_path": "DATASET\\df_master_engineered.parquet",
+  "data_file_exists": true,
+  "data_file_size_bytes": 16517327,
+  "feature_list_path": "model_feature_lists.json",
+  "feature_list_sha256": "74d8e65774b346d58eb5ae2bd996fd809ba3048bf7d7dfe591a499e4170be1ba",
+  "artifact_files": [
+    "model_dso1_drop.pkl",
+    "model_dso1_xgb.pkl",
+    "model_dso2_gain.pkl",
+    "model_dso2_ranker.pkl",
+    "model_dso2_threshold.pkl",
+    "model_dso2_xgb_honest.pkl",
+    "model_dso3_cluster.pkl",
+    "model_dso3_k.pkl",
+    "model_dso3_kmeans.pkl",
+    "model_dso3_lr_classifier.pkl",
+    "model_dso4_calibrated.pkl",
+    "model_dso4_controller.pkl",
+    "model_dso4_hbahn_controller.pkl",
+    "model_dso4_master.pkl",
+    "model_dso4_mobile_controller.pkl",
+    "model_dso4_stage1_gate.pkl",
+    "model_dso4_stage1_gate_threshold.pkl",
+    "model_dso4_stage2_benefit.pkl",
+    "model_dso4_threshold.pkl",
+    "scaler_dso1.pkl",
+    "scaler_dso2.pkl",
+    "scaler_dso3.pkl"
+  ],
+  "metrics_summary": {
+    "dso1_roc_auc": 0.8921,
+    "dso4_roc_auc": 0.9788,
+    "dso4_mcc": 0.826,
+    "dso4_threshold": 0.82
+  }
+}

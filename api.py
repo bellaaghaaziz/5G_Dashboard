@@ -28,6 +28,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 
@@ -35,9 +39,180 @@ import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
+try:
+    from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+except Exception:
+    Counter = None
+    Histogram = None
+    generate_latest = None
+    CONTENT_TYPE_LATEST = "text/plain; version=0.0.4"
 
 log = logging.getLogger(__name__)
+
+# ── MLOps pipeline orchestrator state ─────────────────────────────────────────
+_mlops_lock = threading.Lock()
+_mlops_state: dict = {
+    "status": "idle",  # idle | running | completed | failed
+    "started_at": None,
+    "completed_at": None,
+    "step": "",
+    "run_id": None,
+    "model_name": None,
+    "model_version": None,
+    "promoted": None,
+    "exit_code": None,
+    "error": None,
+    "log_path": None,
+}
+
+
+def _mlops_log_dir() -> Path:
+    d = Path("logs") / "mlops_runs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _append_mlops_history(record: dict) -> None:
+    hist = Path("logs") / "mlops_history.jsonl"
+    hist.parent.mkdir(parents=True, exist_ok=True)
+    hist.write_text(hist.read_text(encoding="utf-8") + json.dumps(record) + "\n", encoding="utf-8") if hist.exists() else hist.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+
+def _run_mlops_pipeline_subprocess(args: dict) -> None:
+    started_at = time.time()
+    log_path = _mlops_log_dir() / f"mlops_{int(started_at)}.log"
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "mlops.pipeline_runner",
+        "--data-path",
+        str(args.get("data_path") or "DATASET/df_master_engineered.parquet"),
+        "--model-dir",
+        str(args.get("model_dir") or "."),
+        "--min-dso4-auc",
+        str(args.get("min_dso4_auc") or 0.90),
+        "--min-dso4-mcc",
+        str(args.get("min_dso4_mcc") or 0.70),
+    ]
+    if args.get("with_mlflow", True):
+        cmd.append("--with-mlflow")
+    if args.get("promote", True):
+        cmd.append("--promote")
+    if args.get("require_promotion", True):
+        cmd.append("--require-promotion")
+
+    env = os.environ.copy()
+    # Keep existing default behavior (file:./mlruns) unless user overrides.
+    env.setdefault("MLFLOW_TRACKING_URI", "file:./mlruns")
+
+    run_id = None
+    model_version = None
+    promoted = False
+
+    try:
+        with subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        ) as p, open(log_path, "w", encoding="utf-8") as f:
+            for line in p.stdout or []:
+                f.write(line)
+                f.flush()
+                if run_id is None:
+                    m = re.search(r"MLflow run:\\s*([0-9a-f]{32})", line)
+                    if m:
+                        run_id = m.group(1)
+                if model_version is None:
+                    m2 = re.search(r"DSO4 registered as version\\s+(\\d+)", line)
+                    if m2:
+                        model_version = m2.group(1)
+                if "→ Production" in line or "-> Production" in line:
+                    promoted = True
+            p.wait()
+            exit_code = int(p.returncode or 0)
+        error_msg = None if exit_code == 0 else f"pipeline_runner exit_code={exit_code}"
+    except Exception as exc:
+        exit_code = 1
+        error_msg = f"pipeline_runner_exception={exc}"
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"[mlops-runner-exception] {exc}\n")
+        except Exception:
+            pass
+
+    completed_at = time.time()
+    status = "completed" if exit_code == 0 else "failed"
+    promotion_reason = (
+        "Promoted to Production stage."
+        if (exit_code == 0 and promoted)
+        else (
+            "Run succeeded but promotion did not happen."
+            if exit_code == 0
+            else (error_msg or "Pipeline failed before promotion.")
+        )
+    )
+
+    with _mlops_lock:
+        _mlops_state.update(
+            {
+                "status": status,
+                "completed_at": completed_at,
+                "step": "done",
+                "run_id": run_id,
+                "model_name": args.get("mlflow_model_name") or "5G-DSO4-Controller",
+                "model_version": model_version,
+                "promoted": promoted if exit_code == 0 else False,
+                "promotion_reason": promotion_reason,
+                "exit_code": exit_code,
+                "error": error_msg,
+                "log_path": str(log_path),
+            }
+        )
+
+    _append_mlops_history(
+        {
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "status": status,
+            "exit_code": exit_code,
+            "run_id": run_id,
+            "model_name": args.get("mlflow_model_name") or "5G-DSO4-Controller",
+            "model_version": model_version,
+            "promoted": promoted if exit_code == 0 else False,
+            "promotion_reason": promotion_reason,
+            "error": error_msg,
+            "log_path": str(log_path),
+        }
+    )
+
+
+class MLOpsRunRequest(BaseModel):
+    data_path: str = "DATASET/df_master_engineered.parquet"
+    model_dir: str = "."
+    with_mlflow: bool = True
+    promote: bool = True
+    require_promotion: bool = True
+    min_dso4_auc: float = 0.90
+    min_dso4_mcc: float = 0.70
+    mlflow_model_name: str = "5G-DSO4-Controller"
+
+
+def _read_tail(path: Path, max_lines: int = 200) -> list[str]:
+    if not path.exists():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return lines[-max_lines:]
+    except Exception:
+        return []
+
 
 # ── App setup ────────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -190,8 +365,38 @@ class PredictionResponse(BaseModel):
 # ── Counters ─────────────────────────────────────────────────────────────────
 _server_start = time.time()
 _predictions_served = 0
+if Counter and Histogram:
+    PREDICT_REQUESTS_TOTAL = Counter(
+        "cellpilot_predict_requests_total",
+        "Total number of predict requests",
+    )
+    PREDICT_ERRORS_TOTAL = Counter(
+        "cellpilot_predict_errors_total",
+        "Total number of failed predict requests",
+    )
+    HANDOVER_RECOMMENDED_TOTAL = Counter(
+        "cellpilot_handover_recommended_total",
+        "Total number of handover recommendations",
+    )
+    PREDICT_LATENCY_SECONDS = Histogram(
+        "cellpilot_predict_latency_seconds",
+        "Predict endpoint latency in seconds",
+        buckets=(0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0),
+    )
+else:
+    PREDICT_REQUESTS_TOTAL = None
+    PREDICT_ERRORS_TOTAL = None
+    HANDOVER_RECOMMENDED_TOTAL = None
+    PREDICT_LATENCY_SECONDS = None
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
+@app.get("/metrics/prometheus", tags=["System"])
+def prometheus_metrics():
+    """Expose Prometheus-compatible metrics endpoint."""
+    if generate_latest is None:
+        return PlainTextResponse("Prometheus client not installed", status_code=501)
+    return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.get("/models/info", tags=["System"])
 def models_info():
@@ -212,6 +417,9 @@ def models_info():
 def predict(payload: TelemetryInput):
     """Full 4-stage inference: DSO3 → DSO1 → DSO4 (gate + calibrated)."""
     global _predictions_served
+    t0 = time.perf_counter()
+    if PREDICT_REQUESTS_TOTAL:
+        PREDICT_REQUESTS_TOTAL.inc()
     try:
         from src.model_pipeline import predict_single
         inputs = payload.model_dump()
@@ -228,10 +436,18 @@ def predict(payload: TelemetryInput):
 
         # Log to ELK
         _get_elk()(inputs, result)
+        if HANDOVER_RECOMMENDED_TOTAL and result.get("handover_recommended"):
+            HANDOVER_RECOMMENDED_TOTAL.inc()
+        if PREDICT_LATENCY_SECONDS:
+            PREDICT_LATENCY_SECONDS.observe(time.perf_counter() - t0)
 
         return result
     except Exception as exc:
         log.exception("Prediction error")
+        if PREDICT_ERRORS_TOTAL:
+            PREDICT_ERRORS_TOTAL.inc()
+        if PREDICT_LATENCY_SECONDS:
+            PREDICT_LATENCY_SECONDS.observe(time.perf_counter() - t0)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -424,6 +640,125 @@ def get_metrics():
     except Exception as e:
         return {"error": str(e)}
 
+
+@app.get("/metrics/prometheus", tags=["System"])
+def get_prometheus_metrics():
+    """Expose Prometheus metrics for observability stack scraping."""
+    if not generate_latest:
+        return PlainTextResponse("prometheus_client not installed", status_code=503)
+    return PlainTextResponse(generate_latest().decode("utf-8"), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.post("/mlops/run", tags=["MLOps"])
+def mlops_run(req: MLOpsRunRequest):
+    with _mlops_lock:
+        if _mlops_state.get("status") == "running":
+            return {"ok": False, "error": "MLOps pipeline already running", "state": dict(_mlops_state)}
+        _mlops_state.update(
+            {
+                "status": "running",
+                "started_at": time.time(),
+                "completed_at": None,
+                "step": "starting",
+                "run_id": None,
+                "model_name": req.mlflow_model_name,
+                "model_version": None,
+                "promoted": None,
+                "exit_code": None,
+                "error": None,
+                "log_path": None,
+            }
+        )
+
+    t = threading.Thread(target=_run_mlops_pipeline_subprocess, args=(req.model_dump(),), daemon=True)
+    t.start()
+    return {"ok": True, "state": dict(_mlops_state)}
+
+
+@app.get("/mlops/status", tags=["MLOps"])
+def mlops_status():
+    with _mlops_lock:
+        state = dict(_mlops_state)
+    log_tail: list[str] = []
+    if state.get("log_path"):
+        log_tail = _read_tail(Path(state["log_path"]), max_lines=250)
+    return {"state": state, "log_tail": log_tail}
+
+
+@app.get("/mlops/history", tags=["MLOps"])
+def mlops_history():
+    path = Path("logs") / "mlops_history.jsonl"
+    if not path.exists():
+        return {"items": []}
+    items: list[dict] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[-200:]:
+        try:
+            items.append(json.loads(line))
+        except Exception:
+            continue
+    items.reverse()
+    return {"items": items}
+
+
+@app.get("/mlops/mlflow-summary", tags=["MLOps"])
+def mlflow_summary():
+    """
+    Returns recent runs and model versions from the MLflow tracking store.
+    Uses MLFLOW_TRACKING_URI or defaults to file:./mlruns (same as pipeline runner).
+    """
+    try:
+        import mlflow
+        from mlflow.tracking import MlflowClient
+
+        tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
+        mlflow.set_tracking_uri(tracking_uri)
+        client = MlflowClient()
+
+        exp = mlflow.get_experiment_by_name("5G-Handover-AI")
+        exp_id = exp.experiment_id if exp else "0"
+
+        runs = mlflow.search_runs(
+            experiment_ids=[exp_id],
+            max_results=20,
+            order_by=["attributes.start_time DESC"],
+        )
+        recent_runs = []
+        if runs is not None and len(runs) > 0:
+            for _, row in runs.iterrows():
+                recent_runs.append(
+                    {
+                        "run_id": row.get("run_id"),
+                        "status": row.get("status"),
+                        "start_time": row.get("start_time"),
+                        "end_time": row.get("end_time"),
+                    }
+                )
+
+        model_name = "5G-DSO4-Controller"
+        versions = []
+        try:
+            for mv in client.search_model_versions(f"name='{model_name}'"):
+                versions.append(
+                    {
+                        "name": mv.name,
+                        "version": mv.version,
+                        "creation_timestamp": mv.creation_timestamp,
+                        "current_stage": getattr(mv, "current_stage", None),
+                        "run_id": mv.run_id,
+                    }
+                )
+            versions.sort(key=lambda x: int(x["version"]), reverse=True)
+        except Exception:
+            versions = []
+
+        return {
+            "tracking_uri": tracking_uri,
+            "experiment": {"name": "5G-Handover-AI", "id": exp_id},
+            "recent_runs": recent_runs,
+            "model_registry": {"name": model_name, "versions": versions[:20]},
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ── Enhanced health endpoint ────────────────────────────────────────────────
 

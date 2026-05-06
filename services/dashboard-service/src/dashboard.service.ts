@@ -47,6 +47,12 @@ export class DashboardService {
   private readonly handoverLogPath =
     process.env.HANDOVER_LOG_PATH ?? "/app/shared-logs/handover_log.json";
 
+  private readonly datasetMapPath =
+    process.env.DATASET_MAP_PATH ?? "/app/shared-logs/dataset_map_state.json";
+
+  private readonly datasetHoPath =
+    process.env.DATASET_HO_PATH ?? "/app/shared-logs/dataset_handover_history.json";
+
   getCellGps(): Record<string, { lat: number; lng: number; scenario: string }> {
     if (!existsSync(this.gpsPath)) return {};
     try {
@@ -232,6 +238,97 @@ export class DashboardService {
         timestamp: anyRow.event_timestamp ?? anyRow["@timestamp"],
         ue_lat: uelat,
         ue_lng: uelng,
+      };
+    });
+  }
+
+  // ── Trip Paths ──
+  getTripPaths() {
+    const TRIP_COLORS = ["#22d3ee", "#a855f7", "#10b981", "#f97316"];
+
+    let allRows: PredictionLog[] = [];
+    if (existsSync(this.logsPath)) {
+      try {
+        const raw = readFileSync(this.logsPath, "utf-8").trim();
+        if (raw) {
+          allRows = raw
+            .split("\n")
+            .slice(-6000)
+            .map((line) => { try { return JSON.parse(line) as PredictionLog; } catch { return null; } })
+            .filter((r): r is PredictionLog => r !== null);
+        }
+      } catch {}
+    }
+
+    const byUE = new Map<string, any[]>();
+    for (const row of allRows) {
+      const anyRow = row as any;
+      const masterId: string | undefined = anyRow.master_id ?? (row.inputs as any)?.master_id;
+      if (!masterId) continue;
+      const lat = anyRow.ue_lat ?? (row.inputs as any)?.ue_lat;
+      const lng = anyRow.ue_lng ?? (row.inputs as any)?.ue_lng;
+      if (lat == null || lng == null) continue;
+      if (!byUE.has(masterId)) byUE.set(masterId, []);
+      byUE.get(masterId)!.push(row);
+    }
+
+    const getTs = (r: any) => this.toMs(r.event_timestamp ?? r["@timestamp"]);
+
+    const topUEs = Array.from(byUE.entries())
+      .sort(([, a], [, b]) => b.length - a.length)
+      .slice(0, 4);
+
+    return topUEs.map(([ue_id, ueRows], colorIdx) => {
+      const chronological = [...ueRows].sort((a, b) => getTs(a) - getTs(b));
+      const anyFirst = chronological[0] as any;
+      const scenario: string = anyFirst.scenario ?? (anyFirst.inputs as any)?.scenario ?? "unknown";
+
+      let prevCellId = -1;
+      let prevRsrp = -140;
+
+      const path = chronological.map((row: any) => {
+        const cellId = Number(row.inputs?.physical_cellid ?? (row as any).inputs?.physical_cellid ?? 0);
+        const rsrp: number = (row as any).rsrp ?? row.inputs?.rsrp ?? -140;
+        const isHandover = prevCellId !== -1 && cellId !== prevCellId;
+        const fromCell = isHandover ? prevCellId : undefined;
+        const rsrpGain = isHandover ? +((rsrp - prevRsrp).toFixed(1)) : undefined;
+        prevCellId = cellId;
+        prevRsrp = rsrp;
+
+        return {
+          lat: (row as any).ue_lat ?? row.inputs?.ue_lat,
+          lng: (row as any).ue_lng ?? row.inputs?.ue_lng,
+          timestamp: (row as any).event_timestamp ?? (row as any)["@timestamp"] ?? "",
+          rsrp,
+          sinr: (row as any).sinr ?? row.inputs?.sinr ?? 0,
+          velocity: (row as any).velocity ?? row.inputs?.velocity ?? 0,
+          cell_id: cellId,
+          is_handover: isHandover,
+          is_recommended: this.rowSuggestsHandover(row),
+          from_cell: fromCell,
+          rsrp_gain: rsrpGain,
+        };
+      });
+
+      const last = path[path.length - 1];
+      const handovers = path.filter((p) => p.is_handover);
+      const avgRsrp = path.length > 0
+        ? +(path.reduce((s, p) => s + p.rsrp, 0) / path.length).toFixed(1)
+        : -140;
+
+      return {
+        ue_id,
+        scenario,
+        color: TRIP_COLORS[colorIdx],
+        path,
+        stats: {
+          handover_count: handovers.length,
+          ai_handovers: handovers.filter((p) => p.is_recommended).length,
+          avg_rsrp: avgRsrp,
+          current_cell: last?.cell_id ?? 0,
+          current_rsrp: last?.rsrp ?? -140,
+          current_velocity: last?.velocity ?? 0,
+        },
       };
     });
   }
@@ -452,13 +549,162 @@ export class DashboardService {
     }
   }
 
-  async getDatasetHandovers() {
+  getDatasetMapState() {
+    if (!existsSync(this.datasetMapPath)) return [];
     try {
-      const { data } = await axios.get(`${this.mlServiceUrl}/dataset/handovers`, { timeout: 5000 });
-      return data;
-    } catch (e: any) {
-      return {};
+      return JSON.parse(readFileSync(this.datasetMapPath, "utf-8"));
+    } catch {
+      return [];
     }
+  }
+
+  getDatasetHandovers() {
+    if (!existsSync(this.datasetHoPath)) return [];
+    try {
+      const raw = JSON.parse(readFileSync(this.datasetHoPath, "utf-8"));
+      return Array.isArray(raw) ? raw.slice().reverse() : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private readHoEvents(): any[] {
+    if (!existsSync(this.datasetHoPath)) return [];
+    try {
+      const raw = JSON.parse(readFileSync(this.datasetHoPath, "utf-8"));
+      return Array.isArray(raw) ? raw : [];
+    } catch {
+      return [];
+    }
+  }
+
+  getDatasetOverview() {
+    const mapState: any[] = (() => {
+      if (!existsSync(this.datasetMapPath)) return [];
+      try { return JSON.parse(readFileSync(this.datasetMapPath, "utf-8")); } catch { return []; }
+    })();
+
+    const hoEvents = this.readHoEvents();
+    const total = hoEvents.length;
+    const mobility = hoEvents.filter((e: any) => e.reason === "mobility").length;
+    const congestion = hoEvents.filter((e: any) => e.reason === "congestion").length;
+    const gains = hoEvents.map((e: any) => Number(e.rsrp_gain)).filter((g: number) => isFinite(g));
+    const avgGain = gains.length > 0
+      ? Math.round((gains.reduce((a: number, b: number) => a + b, 0) / gains.length) * 10) / 10
+      : 0;
+
+    const progressPcts = mapState.map((d: any) => Number(d.progress?.pct ?? 0));
+    const avgProgress = progressPcts.length > 0
+      ? Math.round((progressPcts.reduce((a: number, b: number) => a + b, 0) / progressPcts.length) * 10) / 10
+      : 0;
+
+    // AI stats from handover events annotated by the replayer
+    const aiProactive = hoEvents.filter((e: any) =>
+      e.ai_prediction?.recommended === true &&
+      typeof e.ai_prediction?.proactive_headroom_db === "number" &&
+      e.ai_prediction.proactive_headroom_db > 0,
+    ).length;
+
+    const headrooms = hoEvents
+      .filter((e: any) =>
+        typeof e.ai_prediction?.proactive_headroom_db === "number" &&
+        e.ai_prediction.proactive_headroom_db > 0,
+      )
+      .map((e: any) => e.ai_prediction.proactive_headroom_db as number);
+
+    const avgHeadroomDb = headrooms.length > 0
+      ? Math.round((headrooms.reduce((a, b) => a + b, 0) / headrooms.length) * 10) / 10
+      : 0;
+
+    const aiProactiveRate = total > 0 ? Math.round((aiProactive / total) * 100) : 0;
+
+    return {
+      kpis: {
+        totalHandovers: total,
+        mobilityHandovers: mobility,
+        congestionHandovers: congestion,
+        avgRsrpGain: avgGain,
+        activeDevices: mapState.length,
+        replayProgress: avgProgress,
+        aiProactiveCount: aiProactive,
+        aiProactiveRate: aiProactiveRate,
+        aiAvgHeadroomDb: avgHeadroomDb,
+      },
+      devices: mapState.map((d: any) => ({
+        name: d.name,
+        color: d.color,
+        scenario: d.scenario,
+        currentRsrp: d.stats?.current_rsrp ?? -140,
+        currentVelocity: d.stats?.current_velocity ?? 0,
+        progress: d.progress ?? null,
+      })),
+    };
+  }
+
+  getTowerStats() {
+    const hoEvents = this.readHoEvents();
+    const cellGps = this.getCellGps();
+    const mapState: any[] = (() => {
+      if (!existsSync(this.datasetMapPath)) return [];
+      try { return JSON.parse(readFileSync(this.datasetMapPath, "utf-8")); } catch { return []; }
+    })();
+
+    const events = hoEvents.slice(-2000);
+
+    // Cells currently connected to a device
+    const activeCells = new Set<number>();
+    for (const device of mapState) {
+      const cell = device?.stats?.current_cell;
+      if (cell != null) activeCells.add(Number(cell));
+    }
+
+    const stats = new Map<number, {
+      cell_id: number; lat: number; lng: number;
+      departures: number; arrivals: number; congestion: number; rsrp_sum: number;
+    }>();
+
+    const ensureCell = (cid: number): boolean => {
+      if (stats.has(cid)) return true;
+      const gps = cellGps[String(cid)];
+      if (!gps) return false;
+      stats.set(cid, { cell_id: cid, lat: gps.lat, lng: gps.lng, departures: 0, arrivals: 0, congestion: 0, rsrp_sum: 0 });
+      return true;
+    };
+
+    for (const ev of events) {
+      if (ev.from_cell != null && ensureCell(Number(ev.from_cell))) {
+        const s = stats.get(Number(ev.from_cell))!;
+        s.departures++;
+        if (ev.reason === "congestion") s.congestion++;
+        s.rsrp_sum += Number(ev.rsrp_before) || -140;
+      }
+      if (ev.to_cell != null && ensureCell(Number(ev.to_cell))) {
+        stats.get(Number(ev.to_cell))!.arrivals++;
+      }
+    }
+
+    // Ensure currently-active cells appear even if no HO history yet
+    for (const cid of activeCells) ensureCell(cid);
+
+    return Array.from(stats.values()).map(s => {
+      const congestionRatio = s.departures > 0 ? s.congestion / s.departures : 0;
+      const avgRsrp = s.departures > 0 ? s.rsrp_sum / s.departures : -140;
+      let status: "healthy" | "congested" | "high_risk" = "healthy";
+      if (s.departures >= 2 && congestionRatio >= 0.35) status = "congested";
+      else if (s.departures >= 2 && avgRsrp < -105) status = "high_risk";
+
+      return {
+        cell_id: s.cell_id,
+        lat: s.lat,
+        lng: s.lng,
+        departures: s.departures,
+        arrivals: s.arrivals,
+        congestion_ratio: Math.round(congestionRatio * 100) / 100,
+        avg_rsrp: Math.round(avgRsrp * 10) / 10,
+        status,
+        is_active: activeCells.has(s.cell_id),
+      };
+    }).sort((a, b) => (b.departures + b.arrivals) - (a.departures + a.arrivals));
   }
 
   async getDatasetInfo() {

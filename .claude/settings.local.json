@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\azizb\\\\5G_Dashboard\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\azizb\\\\5G_Dashboard\" | Select-Object Name, @{Name='Type';Expression={if\\($_.PSIsContainer\\){'Dir'}else{'File'}}} | Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\azizb\\\\5G_Dashboard\\\\.github\" -Recurse | Select-Object FullName | ForEach-Object { $_.FullName.Replace\\(\"C:\\\\Users\\\\azizb\\\\5G_Dashboard\\\\\", \"\"\\) })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\azizb\\\\5G_Dashboard\\\\apps\" -Recurse -Depth 2 | Select-Object FullName | ForEach-Object { $_.FullName.Replace\\(\"C:\\\\Users\\\\azizb\\\\5G_Dashboard\\\\\", \"\"\\) })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\azizb\\\\5G_Dashboard\\\\services\" -Recurse -Depth 2 | Select-Object FullName | ForEach-Object { $_.FullName.Replace\\(\"C:\\\\Users\\\\azizb\\\\5G_Dashboard\\\\\", \"\"\\) })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\azizb\\\\5G_Dashboard\\\\mlops\" -Recurse -Depth 2 | Select-Object FullName | ForEach-Object { $_.FullName.Replace\\(\"C:\\\\Users\\\\azizb\\\\5G_Dashboard\\\\\", \"\"\\) })",
+      "Bash(docker exec platform-dashboard-service *)",
+      "Bash(npx tsc *)",
+      "PowerShell(docker cp \"C:\\\\Users\\\\azizb\\\\5G_Dashboard\\\\services\\\\dashboard-service\\\\dist\\\\dashboard.service.js\" platform-dashboard-service:/app/services/dashboard-service/dist/dashboard.service.js; Write-Host \"Copied JS\"; docker restart platform-dashboard-service; Write-Host \"Restarted\")",
+      "Bash(docker exec *)",
+      "Bash(docker cp *)",
+      "PowerShell(docker cp *)",
+      "Bash(python3 -c \"import sys,json; d=json.loads\\(sys.stdin.read\\(\\)\\); [print\\(x['ue_id'], 'cell:', x['stats']['current_cell'], 'ho:', x['stats']['handover_count']\\) for x in d]\")",
+      "Bash(python3 -c \"import sys,json; d=json.loads\\(sys.stdin.read\\(\\)\\); print\\(json.dumps\\(d['kpis'], indent=2\\)\\)\")"
+    ]
+  }
+}

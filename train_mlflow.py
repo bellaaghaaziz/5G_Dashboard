@@ -15,6 +15,8 @@ MLflow UI:
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import logging
 import os
 import subprocess
@@ -37,6 +39,44 @@ def _git_commit() -> str:
         ).strip()
     except Exception:
         return "unknown"
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_model_manifest(model_dir: str, data_path: str, metrics: dict) -> Path:
+    d = Path(model_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    data_file = Path(data_path)
+    feature_file = d / "model_feature_lists.json"
+    artifact_files = sorted([p.name for p in d.glob("*.pkl")])
+
+    manifest = {
+        "created_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "git_commit": _git_commit(),
+        "python_version": sys.version.split(" ")[0],
+        "cwd": os.getcwd(),
+        "data_path": str(data_file),
+        "data_file_exists": data_file.exists(),
+        "data_file_size_bytes": data_file.stat().st_size if data_file.exists() else None,
+        "feature_list_path": str(feature_file),
+        "feature_list_sha256": _sha256_file(feature_file) if feature_file.exists() else None,
+        "artifact_files": artifact_files,
+        "metrics_summary": {
+            "dso1_roc_auc": metrics.get("dso1", {}).get("roc_auc"),
+            "dso4_roc_auc": metrics.get("dso4", {}).get("roc_auc"),
+            "dso4_mcc": metrics.get("dso4", {}).get("mcc"),
+            "dso4_threshold": metrics.get("dso4", {}).get("threshold"),
+        },
+    }
+    manifest_path = d / "model_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return manifest_path
 
 
 def run_with_mlflow(
@@ -62,13 +102,13 @@ def run_with_mlflow(
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment_name)
+    path = data_path or "./DATASET/df_master_engineered.parquet"
 
     # If no pre-computed artifacts, train from scratch
     if artifacts is None:
         from src.model_pipeline import prepare_data, train_all, evaluate_all, save_artifacts
 
         log.info("Training from scratch with MLflow tracking...")
-        path = data_path or "./DATASET/df_master_engineered.parquet"
         data = prepare_data(parquet_path=path)
 
         t0 = time.time()
@@ -149,6 +189,9 @@ def run_with_mlflow(
         fl_path = Path("model_feature_lists.json")
         if fl_path.exists():
             mlflow.log_artifact(str(fl_path))
+
+        manifest_path = write_model_manifest(".", path, metrics or {})
+        mlflow.log_artifact(str(manifest_path))
 
         # ── Log metrics summary ──────────────────────────────────────────
         if metrics:

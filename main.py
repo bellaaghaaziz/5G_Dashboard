@@ -13,8 +13,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -39,6 +42,53 @@ def banner(title: str) -> None:
     log.info(line)
     log.info("  %s", title)
     log.info(line)
+
+
+def _git_commit() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], text=True
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_model_manifest(model_dir: str, data_path: str, metrics: dict) -> Path:
+    d = Path(model_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    data_file = Path(data_path)
+    feature_file = d / "model_feature_lists.json"
+    artifact_files = sorted([p.name for p in d.glob("*.pkl")])
+
+    manifest = {
+        "created_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "git_commit": _git_commit(),
+        "python_version": sys.version.split(" ")[0],
+        "cwd": os.getcwd(),
+        "data_path": str(data_file),
+        "data_file_exists": data_file.exists(),
+        "data_file_size_bytes": data_file.stat().st_size if data_file.exists() else None,
+        "feature_list_path": str(feature_file),
+        "feature_list_sha256": _sha256_file(feature_file) if feature_file.exists() else None,
+        "artifact_files": artifact_files,
+        "metrics_summary": {
+            "dso1_roc_auc": metrics.get("dso1", {}).get("roc_auc"),
+            "dso4_roc_auc": metrics.get("dso4", {}).get("roc_auc"),
+            "dso4_mcc": metrics.get("dso4", {}).get("mcc"),
+            "dso4_threshold": metrics.get("dso4", {}).get("threshold"),
+        },
+    }
+    manifest_path = d / "model_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return manifest_path
 
 
 def cmd_train(args: argparse.Namespace) -> None:
@@ -92,6 +142,8 @@ def cmd_train(args: argparse.Namespace) -> None:
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics_clean, f, indent=2)
     log.info("Metrics saved to %s", metrics_path)
+    manifest_path = write_model_manifest(args.model_dir, args.data_path, metrics_clean)
+    log.info("Model manifest saved to %s", manifest_path)
 
     # Step 5: MLflow (optional)
     if args.with_mlflow:

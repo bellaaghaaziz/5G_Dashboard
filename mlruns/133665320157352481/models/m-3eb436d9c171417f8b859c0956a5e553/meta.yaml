@@ -1,0 +1,10 @@
+artifact_location: file:C:/Users/azizb/5G_Dashboard/mlruns/133665320157352481/models/m-3eb436d9c171417f8b859c0956a5e553/artifacts
+creation_timestamp: 1778064885618
+experiment_id: '133665320157352481'
+last_updated_timestamp: 1778064886006
+model_id: m-3eb436d9c171417f8b859c0956a5e553
+model_type: null
+name: model_dso1_xgb
+source_run_id: 6ce36678e79b405aa0fe393b6dc7e887
+status: 3
+status_message: null

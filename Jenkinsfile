@@ -75,7 +75,24 @@ pipeline {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // 4. PUSH TO DOCKER REGISTRY
+    // 4. PERFORMANCE VERIFICATION
+    //    Enforce latency guardrail on inference contract path.
+    // ─────────────────────────────────────────────────────────────────────
+    stage('Performance Verification') {
+      steps {
+        sh '''
+          docker run --rm \
+            -v ${WORKSPACE}:/workspace \
+            -w /workspace \
+            ${IMAGE} \
+            python -m pytest -q tests/test_inference_contract_perf.py
+        '''
+        echo "✅ Inference contract and performance checks passed."
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 5. PUSH TO DOCKER REGISTRY
     //    Uncomment the credential block and set IMAGE_REMOTE above to enable.
     // ─────────────────────────────────────────────────────────────────────
     stage('Push to Docker Registry') {
@@ -104,7 +121,7 @@ pipeline {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // 5. DEPLOY TO KUBERNETES
+    // 6. DEPLOY TO KUBERNETES
     // ─────────────────────────────────────────────────────────────────────
     stage('Deploy to Kubernetes') {
       steps {

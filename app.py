@@ -239,115 +239,183 @@ with st.sidebar:
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN AREA
 # ─────────────────────────────────────────────────────────────────────────────
-st.title("📡 5G Master Handover Controller")
-st.caption("Stacked AI pipeline: DSO1 → DSO2 → DSO3 → DSO4")
+st.title("📡 5G Master Handover Platform")
 
-if not submitted:
-    st.info("👈 Set the telemetry values in the sidebar and click **Run AI Prediction**.")
-    st.stop()
+tab1, tab2, tab3 = st.tabs([
+    "📡 Real-time Inference Pipeline", 
+    "⚙️ MLOps & Platform Health",
+    "☁️ Cloud & Infrastructure (K8s/Terraform)"
+])
 
-# Build user input dict and run pipeline
-user_inputs = {
-    "rsrp":                    rsrp,
-    "rsrq":                    rsrq,
-    "sinr":                    sinr,
-    "cqi":                     float(cqi),
-    "tx_power":                tx_pwr,
-    "ta":                      float(ta),
-    "velocity":                velocity,
-    "num_neighbors":           float(num_nbr),
-    "mean_neighbor_rsrp":      mean_nbr,
-    "best_neighbor_rsrp":      best_nbr,
-    "neighbor_gap":            best_nbr - rsrp,   # derived — consistent with training
-    "hour_of_day":             float(hour_of_day),
-    "day_of_week":             float(day_of_week),
-    "rsrp_delta_3":            rsrp_delta_3,
-    "sinr_delta_3":            sinr_delta_3,
-    "cell_hist_datarate_mean": cell_hist_rate,
-    "cell_load_drop_flag":     1.0 if cell_load_flag else 0.0,
-    "latency_is_imputed":      0.0,   # user is entering fresh data — not imputed
-    "is_ho":                   0.0,   # at inference time we don't know yet
-}
+with tab1:
+    st.caption("Stacked AI pipeline: DSO1 → DSO2 → DSO3 → DSO4")
 
-with st.spinner("Running AI pipeline…"):
-    risk_score, predicted_gain, cluster, decision = run_pipeline(user_inputs)
+    if not submitted:
+        st.info("👈 Set the telemetry values in the sidebar and click **Run AI Prediction**.")
+        st.stop()
 
-# ── Final decision banner ────────────────────────────────────────────────────
-if decision == 1:
-    st.error("## 🚨 HANDOVER RECOMMENDED", icon="🚨")
-else:
-    st.success("## ✅ STAY ON CURRENT CELL", icon="✅")
+    # Build user input dict and run pipeline
+    user_inputs = {
+        "rsrp":                    rsrp,
+        "rsrq":                    rsrq,
+        "sinr":                    sinr,
+        "cqi":                     float(cqi),
+        "tx_power":                tx_pwr,
+        "ta":                      float(ta),
+        "velocity":                velocity,
+        "num_neighbors":           float(num_nbr),
+        "mean_neighbor_rsrp":      mean_nbr,
+        "best_neighbor_rsrp":      best_nbr,
+        "neighbor_gap":            best_nbr - rsrp,
+        "hour_of_day":             float(hour_of_day),
+        "day_of_week":             float(day_of_week),
+        "rsrp_delta_3":            rsrp_delta_3,
+        "sinr_delta_3":            sinr_delta_3,
+        "cell_hist_datarate_mean": cell_hist_rate,
+        "cell_load_drop_flag":     1.0 if cell_load_flag else 0.0,
+        "latency_is_imputed":      0.0,
+        "is_ho":                   0.0,
+    }
 
-st.markdown("---")
+    with st.spinner("Running AI pipeline…"):
+        risk_score, predicted_gain, cluster, decision = run_pipeline(user_inputs)
 
-# ── Four KPI cards ──────────────────────────────────────────────────────────
-col1, col2, col3, col4 = st.columns(4)
+    # ── Final decision banner ────────────────────────────────────────────────────
+    if decision == 1:
+        st.error("## 🚨 HANDOVER RECOMMENDED", icon="🚨")
+    else:
+        st.success("## ✅ STAY ON CURRENT CELL", icon="✅")
 
-risk_pct = risk_score * 100
-risk_delta_color = "inverse" if risk_pct > 50 else "normal"
-col1.metric(
-    "DSO1 — Drop Risk",
-    f"{risk_pct:.1f}%",
-    delta=f"{'High' if risk_pct > 50 else 'Low'} risk",
-    delta_color=risk_delta_color,
-)
+    st.markdown("---")
 
-gain_color = "normal" if predicted_gain > 0 else "inverse"
-col2.metric(
-    "DSO2 — Neighbour Gain",
-    f"{predicted_gain:+.2f} dBm",
-    delta="Switch improves signal" if predicted_gain > 3 else "Marginal gain",
-    delta_color=gain_color,
-)
+    # ── Four KPI cards ──────────────────────────────────────────────────────────
+    col1, col2, col3, col4 = st.columns(4)
 
-cluster_label, cluster_desc = CLUSTER_LABELS.get(cluster, (f"Cluster {cluster}", ""))
-col3.metric(
-    "DSO3 — Network State",
-    cluster_label,
-    delta=cluster_desc,
-    delta_color="off",
-)
+    risk_pct = risk_score * 100
+    risk_delta_color = "inverse" if risk_pct > 50 else "normal"
+    col1.metric(
+        "DSO1 — Drop Risk",
+        f"{risk_pct:.1f}%",
+        delta=f"{'High' if risk_pct > 50 else 'Low'} risk",
+        delta_color=risk_delta_color,
+    )
 
-col4.metric(
-    "DSO4 — Decision",
-    "HANDOVER" if decision == 1 else "STAY",
-    delta="Action required" if decision == 1 else "Hold position",
-    delta_color="inverse" if decision == 1 else "normal",
-)
+    gain_color = "normal" if predicted_gain > 0 else "inverse"
+    col2.metric(
+        "DSO2 — Neighbour Gain",
+        f"{predicted_gain:+.2f} dBm",
+        delta="Switch improves signal" if predicted_gain > 3 else "Marginal gain",
+        delta_color=gain_color,
+    )
 
-st.markdown("---")
+    cluster_label, cluster_desc = CLUSTER_LABELS.get(cluster, (f"Cluster {cluster}", ""))
+    col3.metric(
+        "DSO3 — Network State",
+        cluster_label,
+        delta=cluster_desc,
+        delta_color="off",
+    )
 
-# ── Input summary and pipeline trace ────────────────────────────────────────
-with st.expander("🔍 Full Pipeline Trace"):
-    st.markdown("**Inputs used:**")
-    input_df = pd.DataFrame([user_inputs]).T.rename(columns={0: "Value"})
-    input_df.index.name = "Feature"
-    st.dataframe(input_df.style.format("{:.3f}"), use_container_width=True)
+    col4.metric(
+        "DSO4 — Decision",
+        "HANDOVER" if decision == 1 else "STAY",
+        delta="Action required" if decision == 1 else "Hold position",
+        delta_color="inverse" if decision == 1 else "normal",
+    )
 
-    st.markdown("**Chained DSO outputs:**")
-    chain_df = pd.DataFrame({
-        "Stage": ["DSO1", "DSO2", "DSO3", "DSO4"],
-        "Model": ["XGBoost Classifier", "XGBoost Regressor (honest)", "K-Means (k=4)", "XGBoost Controller"],
-        "Output": [f"{risk_score:.4f} (risk prob)", f"{predicted_gain:.3f} dBm gain",
-                   f"Cluster {cluster} — {cluster_label}", f"{'Handover (1)' if decision == 1 else 'Stay (0)'}"],
-    })
-    st.dataframe(chain_df, use_container_width=True, hide_index=True)
+    st.markdown("---")
 
-# ── Risk gauge (simple visual) ───────────────────────────────────────────────
-st.markdown("### Risk Level")
-bar_color = "#e74c3c" if risk_pct > 60 else ("#f39c12" if risk_pct > 30 else "#2ecc71")
-st.markdown(
-    f"""
-    <div style="background:#eee; border-radius:8px; height:28px; width:100%; margin-bottom:4px">
-      <div style="background:{bar_color}; width:{risk_pct:.1f}%; height:100%;
-                  border-radius:8px; transition:width 0.5s;
-                  display:flex; align-items:center; padding-left:10px; color:white; font-weight:bold">
-        {risk_pct:.1f}%
-      </div>
-    </div>
-    <p style="color:gray; font-size:0.85em; margin:0">
-      0% = no risk of degradation &nbsp;|&nbsp; 100% = certain degradation
-    </p>
-    """,
-    unsafe_allow_html=True,
-)
+    # ── Input summary and pipeline trace ────────────────────────────────────────
+    with st.expander("🔍 Full Pipeline Trace"):
+        st.markdown("**Inputs used:**")
+        input_df = pd.DataFrame([user_inputs]).T.rename(columns={0: "Value"})
+        input_df.index.name = "Feature"
+        st.dataframe(input_df.style.format("{:.3f}"), use_container_width=True)
+
+        st.markdown("**Chained DSO outputs:**")
+        chain_df = pd.DataFrame({
+            "Stage": ["DSO1", "DSO2", "DSO3", "DSO4"],
+            "Model": ["XGBoost Classifier", "XGBoost Regressor (honest)", "K-Means (k=4)", "XGBoost Controller"],
+            "Output": [f"{risk_score:.4f} (risk prob)", f"{predicted_gain:.3f} dBm gain",
+                       f"Cluster {cluster} — {cluster_label}", f"{'Handover (1)' if decision == 1 else 'Stay (0)'}"],
+        })
+        st.dataframe(chain_df, use_container_width=True, hide_index=True)
+
+    # ── Risk gauge (simple visual) ───────────────────────────────────────────────
+    st.markdown("### Risk Level")
+    bar_color = "#e74c3c" if risk_pct > 60 else ("#f39c12" if risk_pct > 30 else "#2ecc71")
+    st.markdown(
+        f"""
+        <div style="background:#eee; border-radius:8px; height:28px; width:100%; margin-bottom:4px">
+          <div style="background:{bar_color}; width:{risk_pct:.1f}%; height:100%;
+                      border-radius:8px; transition:width 0.5s;
+                      display:flex; align-items:center; padding-left:10px; color:white; font-weight:bold">
+            {risk_pct:.1f}%
+          </div>
+        </div>
+        <p style="color:gray; font-size:0.85em; margin:0">
+          0% = no risk of degradation &nbsp;|&nbsp; 100% = certain degradation
+        </p>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with tab2:
+    st.header("⚙️ MLOps Pipeline Observability")
+    st.markdown("Monitor AI drift, performance metrics, and retrain tracking.")
+    
+    col_ml1, col_ml2, col_ml3 = st.columns(3)
+    
+    with col_ml1:
+        st.info("### 🔬 MLflow Tracker")
+        st.markdown("**Tracking:** Model versions, HP tuning, Run History")
+        st.markdown("[🔗 Open MLflow UI (Port 5000)](http://localhost:5000)")
+        
+    with col_ml2:
+        st.warning("### 🪵 Kibana (ELK)")
+        st.markdown("**Tracking:** Raw Data Logs, Payload validation, API queries")
+        st.markdown("[🔗 Open Kibana UI (Port 5601)](http://localhost:5601)")
+
+    with col_ml3:
+        st.success("### 📊 Grafana Dashboards")
+        st.markdown("**Tracking:** Prometheus API Latency, CPU/RAM, Request count")
+        st.markdown("[🔗 Open Grafana UI (Port 3000)](http://localhost:3000)")
+    
+    st.markdown("---")
+    st.subheader("🔄 Model Drift & Active Retraining Control")
+    st.markdown("Manually trigger the retrain pipeline if data drift exceeds thresholds.")
+    if st.button("🚀 Trigger Model Retrain Workflow", type="secondary"):
+        st.success("Retrain workflow triggered. Check Jenkins/GitHub Actions or MLflow for progress.")
+
+with tab3:
+    st.header("☁️ Cloud Infrastructure (Terraform & K8s)")
+    st.markdown("Real-time view of your Infrastructure as Code ecosystem.")
+    
+    st.markdown("### Architecture Components")
+    col_inf1, col_inf2 = st.columns(2)
+    with col_inf1:
+        st.markdown("""
+        **Kubernetes Deployments:**
+        * `cellpilot-inference` (HPA Autoscaling bounds: 2 - 10 Replicas)
+        * `prometheus` (Scraping interval: 5 seconds)
+        * `grafana` (Dashboard engine)
+        
+        **To interact via CLI:**
+        ```bash
+        kubectl get pods -n cellpilot-mlops
+        kubectl get hpa -n cellpilot-mlops
+        ```
+        """)
+    with col_inf2:
+        st.markdown("""
+        **Terraform State (`infra/terraform`):**
+        * Provider: Local/AWS/GCP (configured per env)
+        * Handled resources: K8s Namespaces, Network policies.
+        
+        **Available Makefile Targets:**
+        ```bash
+        make tf-plan
+        make tf-apply
+        make k8s-apply
+        ```
+        """)

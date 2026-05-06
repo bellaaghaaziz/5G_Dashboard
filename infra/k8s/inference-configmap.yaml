@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cellpilot-inference-config
+  namespace: cellpilot-mlops
+data:
+  PYTHONUNBUFFERED: "1"
+  LOG_LEVEL: "INFO"

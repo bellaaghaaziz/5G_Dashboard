@@ -1,0 +1,10 @@
+artifact_location: file:C:/Users/azizb/5G_Dashboard/mlruns/133665320157352481/models/m-fe5ab5ee48824b2c9210755a717f12cd/artifacts
+creation_timestamp: 1778073737443
+experiment_id: '133665320157352481'
+last_updated_timestamp: 1778073742504
+model_id: m-fe5ab5ee48824b2c9210755a717f12cd
+model_type: null
+name: model_dso3_kmeans
+source_run_id: 795f09b20b8c4f1384e2b358154994e1
+status: 2
+status_message: null

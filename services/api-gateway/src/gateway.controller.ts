@@ -62,9 +62,39 @@ export class GatewayController {
 
   @Post("predict")
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles("network_operator", "data_scientist", "admin")
+  @Roles("network_operator", "data_scientist", "ml_engineer", "admin")
   predict(@Body() body: unknown) {
     return this.gatewayService.proxyToPrediction("/predict", "POST", body);
+  }
+
+  // ── MLOps (ML service) ──
+
+  @Post("mlops/run")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  mlopsRun(@Body() body: unknown) {
+    return this.gatewayService.proxyToML("/mlops/run", "POST", body);
+  }
+
+  @Get("mlops/status")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  mlopsStatus() {
+    return this.gatewayService.proxyToML("/mlops/status", "GET");
+  }
+
+  @Get("mlops/history")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  mlopsHistory() {
+    return this.gatewayService.proxyToML("/mlops/history", "GET");
+  }
+
+  @Get("mlops/mlflow-summary")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  mlflowSummary() {
+    return this.gatewayService.proxyToML("/mlops/mlflow-summary", "GET");
   }
 
   // ── Operator ──
@@ -81,6 +111,13 @@ export class GatewayController {
   @Roles("network_operator", "admin")
   mapEvents() {
     return this.gatewayService.proxyToDashboard("/operator/map-events", "GET");
+  }
+
+  @Get("operator/trip-paths")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  getTripPaths() {
+    return this.gatewayService.proxyToDashboard("/operator/trip-paths", "GET");
   }
 
   @Post("operator/playback")
@@ -132,11 +169,32 @@ export class GatewayController {
     return this.gatewayService.proxyToDashboard("/operator/handover-history", "GET");
   }
 
+  @Get("operator/dataset-map")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  getDatasetMap() {
+    return this.gatewayService.proxyToDashboard("/operator/dataset-map", "GET");
+  }
+
   @Get("operator/dataset-handovers")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("network_operator", "admin")
   getDatasetHandovers() {
     return this.gatewayService.proxyToDashboard("/operator/dataset-handovers", "GET");
+  }
+
+  @Get("operator/dataset-overview")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  getDatasetOverview() {
+    return this.gatewayService.proxyToDashboard("/operator/dataset-overview", "GET");
+  }
+
+  @Get("operator/tower-stats")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("network_operator", "admin")
+  getTowerStats() {
+    return this.gatewayService.proxyToDashboard("/operator/tower-stats", "GET");
   }
 
   @Get("operator/dataset-info")
@@ -150,28 +208,28 @@ export class GatewayController {
 
   @Get("scientist/metrics")
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles("data_scientist", "admin")
+  @Roles("data_scientist", "ml_engineer", "admin")
   scientistMetrics() {
     return this.gatewayService.proxyToDashboard("/scientist/metrics", "GET");
   }
 
   @Get("scientist/drift")
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles("data_scientist", "admin")
+  @Roles("data_scientist", "ml_engineer", "admin")
   getDrift() {
     return this.gatewayService.proxyToDashboard("/scientist/drift", "GET");
   }
 
   @Post("scientist/retrain")
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles("data_scientist", "admin")
+  @Roles("data_scientist", "ml_engineer", "admin")
   startRetrain() {
     return this.gatewayService.proxyToDashboardLong("/scientist/retrain", "POST");
   }
 
   @Get("scientist/retrain-status")
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles("data_scientist", "admin")
+  @Roles("data_scientist", "ml_engineer", "admin")
   getRetrainStatus() {
     return this.gatewayService.proxyToDashboard("/scientist/retrain-status", "GET");
   }
@@ -180,7 +238,7 @@ export class GatewayController {
 
   @Get("system/health")
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles("admin")
+  @Roles("admin", "ml_engineer")
   systemHealth() {
     return this.gatewayService.proxyToDashboard("/system/health", "GET");
   }

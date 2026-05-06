@@ -1,0 +1,6 @@
+http://localhost:9090/test/swagger-ui/index.html
+{
+  "usrnom": "mohamed",
+  "usrDateinscription": "2026-05-04",
+  "profession": "ouvrier"
+}

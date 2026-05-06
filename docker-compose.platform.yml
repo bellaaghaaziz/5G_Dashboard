@@ -96,6 +96,7 @@
       USER_SERVICE_URL: http://user-service:3001
       PREDICTION_SERVICE_URL: http://prediction-service:3002
       DASHBOARD_SERVICE_URL: http://dashboard-service:3003
+      ML_SERVICE_URL: http://host.docker.internal:8000
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-access}
     ports:
       - "3000:3000"
@@ -111,6 +112,22 @@
       interval: 15s
       timeout: 5s
       retries: 5
+
+  replayer:
+    build:
+      context: .
+      dockerfile: docker/platform/replayer.Dockerfile
+    container_name: platform-replayer
+    environment:
+      DATASET_PATH: /app/DATASET/df_master_engineered.parquet
+      CELL_GPS_PATH: /app/shared-logs/cell_gps.json
+      MAP_STATE_PATH: /app/shared-logs/dataset_map_state.json
+      HO_HISTORY_PATH: /app/shared-logs/dataset_handover_history.json
+      REPLAY_SPEED: "30"
+    volumes:
+      - ./DATASET:/app/DATASET:ro
+      - ./logs:/app/shared-logs
+    restart: unless-stopped
 
   web:
     build:

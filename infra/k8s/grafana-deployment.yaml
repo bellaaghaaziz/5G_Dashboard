@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: cellpilot-mlops
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.2.0
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: admin
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: admin
+          volumeMounts:
+            - name: grafana-datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: grafana-dashboards-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: grafana-dashboards-json
+              mountPath: /var/lib/grafana/dashboards
+      volumes:
+        - name: grafana-datasources
+          configMap:
+            name: grafana-datasources
+        - name: grafana-dashboards-provider
+          configMap:
+            name: grafana-dashboards-provider
+        - name: grafana-dashboards-json
+          configMap:
+            name: grafana-dashboards-json
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: cellpilot-mlops
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        isDefault: true
+        url: http://prometheus.cellpilot-mlops.svc.cluster.local:9090
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-provider
+  namespace: cellpilot-mlops
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: CellPilot
+        orgId: 1
+        folder: CellPilot
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-json
+  namespace: cellpilot-mlops
+data:
+  inference-overview.json: |
+    {
+      "title": "CellPilot Inference Overview",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "15s",
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Requests / sec",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [
+            { "expr": "sum(rate(cellpilot_predict_requests_total[1m]))", "legendFormat": "rps" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Latency P95 (s)",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(cellpilot_predict_latency_seconds_bucket[5m])) by (le))",
+              "legendFormat": "p95"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Prediction outcomes",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+          "targets": [
+            {
+              "expr": "sum(rate(cellpilot_handover_recommended_total[1m]))",
+              "legendFormat": "handover_recommended"
+            }
+          ]
+        }
+      ]
+    }

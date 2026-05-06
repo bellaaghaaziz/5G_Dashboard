@@ -1,0 +1,10 @@
+artifact_location: file:C:/Users/azizb/5G_Dashboard/mlruns/133665320157352481/models/m-37dd868b954b4226bf84dae9e17799fd/artifacts
+creation_timestamp: 1777232269015
+experiment_id: '133665320157352481'
+last_updated_timestamp: 1777232269681
+model_id: m-37dd868b954b4226bf84dae9e17799fd
+model_type: null
+name: model_dso4_controller
+source_run_id: 3e2562103dd14264936b2451b0250ff8
+status: 3
+status_message: null

@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cellpilot-inference
+  namespace: cellpilot-mlops
+  labels:
+    app: cellpilot-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cellpilot-inference
+  template:
+    metadata:
+      labels:
+        app: cellpilot-inference
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics/prometheus"
+    spec:
+      containers:
+        - name: inference-api
+          image: 5g-handover-ai:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: cellpilot-inference-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1
+              memory: 2Gi
