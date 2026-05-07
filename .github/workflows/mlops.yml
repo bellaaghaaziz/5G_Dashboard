@@ -92,6 +92,7 @@ jobs:
         run: |
           echo "=== Running MLOps pipeline (scikit-learn + MLflow) ==="
           if [ -f "DATASET/df_master_engineered.parquet" ]; then
+            echo "Real dataset found — running full pipeline"
             python -m mlops.pipeline_runner \
               --data-path DATASET/df_master_engineered.parquet \
               --model-dir . \
@@ -102,7 +103,9 @@ jobs:
             || python train_mlflow.py \
             || echo "Training completed (fallback path)"
           else
-            python train_mlflow.py || echo "Training script executed"
+            echo "Dataset not in repo (excluded by .gitignore) — running CI synthetic training"
+            echo "This demonstrates the full MLflow tracking pipeline with synthetic 5G data."
+            python ci_train_synthetic.py
           fi
 
       - name: Show MLflow experiment results
