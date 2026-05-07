@@ -357,3 +357,5 @@ This platform was built as a **5G MLOps research project** to demonstrate:
 <div align="center">
 Made with ☕ and way too many Python warnings about sklearn feature names.
 </div>
+#   M L O p s   P i p e l i n e      5 G   H a n d o v e r   A I  
+ 
