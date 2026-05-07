@@ -1,0 +1,25 @@
+[flake8]
+max-line-length = 120
+extend-ignore =
+    E402,  # module level import not at top
+    W503,  # line break before binary operator
+    E501,  # line too long (handled by max-line-length)
+    W293,  # whitespace before colon
+    W291,  # trailing whitespace
+    E711,  # comparison to None
+    E712,  # comparison to True/False
+    F401,  # imported but unused (too noisy for ML notebooks)
+exclude =
+    .git,
+    __pycache__,
+    mlruns,
+    node_modules,
+    dist,
+    build,
+    .venv,
+    *.egg-info
+per-file-ignores =
+    # Allow star imports and long lines in train scripts
+    train_mlflow.py: F401,E501
+    app.py: E501,F401
+    api.py: E501,F401

@@ -1,0 +1,12 @@
+services:
+  airflow:
+    image: apache/airflow:2.9.1
+    container_name: 5g-airflow
+    command: standalone
+    ports:
+      - "8080:8080"
+    environment:
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - .:/app/5G_Dashboard

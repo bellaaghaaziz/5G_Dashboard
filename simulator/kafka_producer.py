@@ -1,3 +1,4 @@
+import os
 import time
 import json
 import random
@@ -6,8 +7,8 @@ import pandas as pd
 import datetime
 
 # Kafka Configuration
-KAFKA_BROKER = 'localhost:9092'
-TOPIC_NAME = '5g-telemetry'
+KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'localhost:9092')
+TOPIC_NAME = os.getenv('KAFKA_TOPIC', '5g-telemetry')
 
 def generate_telemetry():
     """Simulates real-time 5G network telemetry from a moving UE."""

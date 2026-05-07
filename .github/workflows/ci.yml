@@ -6,10 +6,59 @@ on:
   pull_request:
 
 jobs:
+  # ── 1. Code Quality: lint · format · security ──────────────────────────────
+  code-quality:
+    name: "Code Quality (black · flake8 · bandit · safety)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install quality tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install black flake8 bandit safety
+
+      - name: Black — code formatting check
+        run: |
+          echo "=== Black: checking code format ==="
+          black --check --diff . \
+            --exclude '/(\.git|__pycache__|mlruns|node_modules|\.venv|dist|build)/' \
+            || echo "::warning::Black found formatting issues (non-blocking)"
+        continue-on-error: true
+
+      - name: Flake8 — lint
+        run: |
+          echo "=== Flake8: linting Python source ==="
+          flake8 . --count --statistics --show-source
+        continue-on-error: true
+
+      - name: Bandit — security scan
+        run: |
+          echo "=== Bandit: scanning for security issues ==="
+          bandit -r . \
+            --exclude ./.git,./node_modules,./mlruns,./.venv,./dist \
+            -ll --quiet -f txt
+        continue-on-error: true
+
+      - name: Safety — dependency vulnerability check
+        run: |
+          echo "=== Safety: checking dependencies for CVEs ==="
+          safety check -r requirements.txt --full-report || true
+
+  # ── 2. Python unit tests ───────────────────────────────────────────────────
   python-tests:
-    name: Python (pytest)
+    name: "Python (pytest — unit tests)"
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: code-quality
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,12 +78,14 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          pytest -q
+          pytest -q --tb=short
 
+  # ── 3. MLOps quality gate (model prep + train + evaluate) ─────────────────
   mlops-gate-smoke:
-    name: MLOps (quality gate smoke)
+    name: "MLOps (quality gate — prep · train · evaluate)"
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: python-tests
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,20 +101,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run pipeline runner (no promote)
+      - name: Run MLOps pipeline (prep → train → evaluate → quality gate)
         env:
           PYTHONPATH: ${{ github.workspace }}
+          MLFLOW_TRACKING_URI: file:///${{ github.workspace }}/mlruns
         run: |
           if [ -f "DATASET/df_master_engineered.parquet" ]; then
-            python -m mlops.pipeline_runner --data-path DATASET/df_master_engineered.parquet --model-dir . --min-dso4-auc 0.50 --min-dso4-mcc 0.10
+            echo "Dataset found — running full MLOps pipeline..."
+            python -m mlops.pipeline_runner \
+              --data-path DATASET/df_master_engineered.parquet \
+              --model-dir . \
+              --min-dso4-auc 0.50 \
+              --min-dso4-mcc 0.10 \
+              --with-mlflow
           else
             echo "Dataset not present in CI checkout; skipping full training smoke."
           fi
 
+  # ── 4. Inference API contract + latency test ───────────────────────────────
   inference-contract-performance:
-    name: Inference contract + performance
+    name: "Inference (API contract · latency guardrail)"
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: python-tests
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -84,10 +144,11 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          pytest -q tests/test_inference_contract_perf.py
+          pytest -q tests/test_inference_contract_perf.py --tb=short
 
+  # ── 5. Node / TypeScript build ─────────────────────────────────────────────
   node-build:
-    name: Node (build)
+    name: "Node (TypeScript build — services + web)"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -103,13 +164,12 @@ jobs:
       - name: Install deps (workspace)
         run: npm ci
 
-      - name: Build backend services
+      - name: Build NestJS backend services
         run: |
           npm run -w services/user-service build
           npm run -w services/api-gateway build
           npm run -w services/dashboard-service build
           npm run -w services/prediction-service build
 
-      - name: Build web
+      - name: Build React web app
         run: npm run -w apps/web build
-
