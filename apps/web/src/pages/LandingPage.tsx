@@ -217,22 +217,35 @@ export function LandingPage() {
 
       {/* ── TEAM ── */}
       <section style={{ padding: "80px 48px", background: "rgba(255,255,255,0.01)", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-        <div style={{ maxWidth: 900, margin: "0 auto", textAlign: "center" }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#22d3ee", letterSpacing: 3, textTransform: "uppercase", marginBottom: 16 }}>Team</div>
-          <h2 style={{ fontSize: 38, fontWeight: 900, letterSpacing: -1, marginBottom: 48 }}>The Best Team Group</h2>
-          <div style={{ display: "flex", gap: 32, justifyContent: "center", flexWrap: "wrap" }}>
+        <div style={{ maxWidth: 1000, margin: "0 auto", textAlign: "center" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#22d3ee", letterSpacing: 3, textTransform: "uppercase", marginBottom: 16 }}>The Team</div>
+          <h2 style={{ fontSize: 38, fontWeight: 900, letterSpacing: -1, marginBottom: 12 }}>Nexo Core</h2>
+          <p style={{ color: "#64748b", fontSize: 16, marginBottom: 56 }}>A focused team of engineers building the next generation of intelligent network infrastructure.</p>
+          <div style={{ display: "flex", gap: 24, justifyContent: "center", flexWrap: "wrap" }}>
             {[
-              { name: "Research Advisor", role: "5G Networks & AI Systems", avatar: "RA", color: "#a855f7" },
+              { initials: "AB", name: "Aziz Bella", title: "AI & Platform Lead", desc: "ML pipeline, backend architecture & system design", color: "#22d3ee" },
+              { initials: "NE", name: "Nexo Engineering", title: "Platform Engineering", desc: "Microservices, infrastructure & real-time data pipelines", color: "#3b82f6" },
+              { initials: "DX", name: "Nexo Core", title: "Frontend & UX", desc: "Dashboard design, map visualization & user experience", color: "#a855f7" },
+              { initials: "AI", name: "Nexo Research", title: "AI Research", desc: "Model training, drift detection & performance optimization", color: "#22c55e" },
             ].map(p => (
-              <div key={p.name} style={{ padding: "32px", borderRadius: 20, background: "rgba(15,23,42,0.6)", border: "1px solid rgba(255,255,255,0.06)", textAlign: "center", minWidth: 220 }}>
+              <div key={p.initials} style={{
+                padding: "28px 24px", borderRadius: 20, textAlign: "center", width: 210,
+                background: "rgba(15,23,42,0.6)",
+                border: `1px solid ${p.color}18`,
+                transition: "all 0.3s",
+              }}
+                onMouseEnter={e => { e.currentTarget.style.border = `1px solid ${p.color}45`; e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = `0 16px 40px ${p.color}12`; }}
+                onMouseLeave={e => { e.currentTarget.style.border = `1px solid ${p.color}18`; e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}>
                 <div style={{
-                  width: 72, height: 72, borderRadius: "50%", margin: "0 auto 16px",
-                  background: `linear-gradient(135deg,${p.color},${p.color}88)`,
+                  width: 64, height: 64, borderRadius: "50%", margin: "0 auto 16px",
+                  background: `linear-gradient(135deg,${p.color},${p.color}77)`,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 22, fontWeight: 800, color: "#fff",
-                }}>{p.avatar}</div>
-                <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>{p.name}</div>
-                <div style={{ fontSize: 13, color: "#64748b" }}>{p.role}</div>
+                  fontSize: 18, fontWeight: 900, color: "#fff",
+                  boxShadow: `0 6px 20px ${p.color}30`,
+                }}>{p.initials}</div>
+                <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4, color: "#f1f5f9" }}>{p.name}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: p.color, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>{p.title}</div>
+                <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.6 }}>{p.desc}</div>
               </div>
             ))}
           </div>
