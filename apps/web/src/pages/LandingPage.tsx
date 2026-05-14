@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
+import { NexoLogo } from "../components";
 
 export function LandingPage() {
   const navigate = useNavigate();
@@ -25,13 +26,8 @@ export function LandingPage() {
         transition: "all 0.3s ease",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 10,
-            background: "linear-gradient(135deg,#22d3ee,#3b82f6)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontWeight: 900, fontSize: 13, color: "#fff",
-          }}>5G</div>
-          <span style={{ fontWeight: 800, fontSize: 18, letterSpacing: -0.5 }}>CellPilot</span>
+          <NexoLogo size={36} />
+          <span style={{ fontWeight: 800, fontSize: 18, letterSpacing: -0.5 }}>Nexo</span>
         </div>
         <div style={{ display: "flex", gap: 36, fontSize: 14, fontWeight: 500, color: "#94a3b8" }}>
           {["Features", "About", "Contact"].map(l => (
@@ -194,7 +190,7 @@ export function LandingPage() {
               Built to make 5G <span style={{ background: "linear-gradient(135deg,#22d3ee,#a855f7)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>smarter</span>
             </h2>
             <p style={{ color: "#64748b", lineHeight: 1.8, fontSize: 16, marginBottom: 20 }}>
-              CellPilot is a research platform that uses AI to solve a real problem in 5G networks: keeping every device connected to the right tower at the right time, without any manual intervention.
+              Nexo is a research platform that uses AI to solve a real problem in 5G networks: keeping every device connected to the right tower at the right time, without any manual intervention.
             </p>
             <p style={{ color: "#64748b", lineHeight: 1.8, fontSize: 16 }}>
               The system was trained on over 200,000 real-world signal measurements covering phones on foot, in cars, and on high-speed trains — and responds in under 30 milliseconds.
@@ -274,10 +270,10 @@ export function LandingPage() {
       {/* ── FOOTER ── */}
       <footer style={{ padding: "32px 48px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 8, background: "linear-gradient(135deg,#22d3ee,#3b82f6)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 10, color: "#fff" }}>5G</div>
-          <span style={{ fontWeight: 700, fontSize: 15 }}>CellPilot</span>
+          <NexoLogo size={28} />
+          <span style={{ fontWeight: 700, fontSize: 15 }}>Nexo</span>
         </div>
-        <div style={{ fontSize: 13, color: "#334155" }}>© 2026 CellPilot 5G Platform. All rights reserved.</div>
+        <div style={{ fontSize: 13, color: "#334155" }}>© 2026 Nexo 5G Platform. All rights reserved.</div>
         <button onClick={() => navigate("/login")} style={{
           padding: "9px 22px", borderRadius: 8, border: "1px solid rgba(34,211,238,0.3)",
           background: "transparent", color: "#22d3ee", fontWeight: 700, fontSize: 13,

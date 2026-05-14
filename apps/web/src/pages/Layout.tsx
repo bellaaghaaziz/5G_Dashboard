@@ -12,7 +12,7 @@ import { Avatar, Box, Chip, Divider, Drawer, IconButton, Stack, Tooltip, Typogra
 import { useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/auth";
-import { Chatbot } from "../components";
+import { Chatbot, NexoLogo } from "../components";
 
 const SIDEBAR_WIDTH = 260;
 
@@ -64,15 +64,9 @@ export function Layout() {
       {/* Logo */}
       <Box sx={{ p: 3, pb: 2, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
         <Stack direction="row" alignItems="center" spacing={1.5}>
-          <Box sx={{
-            width: 38, height: 38, borderRadius: "11px",
-            background: "linear-gradient(135deg,#22d3ee,#3b82f6)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#fff", fontWeight: 900, fontSize: 13, flexShrink: 0,
-            boxShadow: "0 4px 16px rgba(34,211,238,0.3)",
-          }}>5G</Box>
+          <NexoLogo size={38} />
           <Box>
-            <Typography sx={{ fontWeight: 900, fontSize: 17, lineHeight: 1, letterSpacing: -0.5 }}>CellPilot</Typography>
+            <Typography sx={{ fontWeight: 900, fontSize: 17, lineHeight: 1, letterSpacing: -0.5 }}>Nexo</Typography>
             <Typography sx={{ fontSize: 10, color: "#334155", fontWeight: 600, letterSpacing: 1.5, textTransform: "uppercase", mt: 0.3 }}>5G Platform</Typography>
           </Box>
         </Stack>
@@ -84,7 +78,7 @@ export function Layout() {
           <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: "#22c55e", animation: "pulse 2s infinite", "@keyframes pulse": { "0%": { boxShadow: "0 0 0 0 rgba(34,197,94,0.6)" }, "70%": { boxShadow: "0 0 0 5px rgba(34,197,94,0)" }, "100%": { boxShadow: "0 0 0 0 rgba(34,197,94,0)" } } }} />
           <Box>
             <Typography sx={{ fontSize: 11, fontWeight: 700, color: "#22c55e", lineHeight: 1 }}>LIVE DATA STREAMING</Typography>
-            <Typography sx={{ fontSize: 10, color: "#164e13", fontWeight: 500, mt: 0.2 }}>DSO Pipeline Active</Typography>
+            <Typography sx={{ fontSize: 10, color: "#164e13", fontWeight: 500, mt: 0.2 }}>AI Pipeline Active</Typography>
           </Box>
           <SignalCellularAltRoundedIcon sx={{ ml: "auto", color: "#22c55e", fontSize: 16 }} />
         </Box>

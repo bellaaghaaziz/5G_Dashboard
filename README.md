@@ -1,6 +1,6 @@
 <div align="center">
 
-# CellPilot — AI-Driven 5G Handover Intelligence Platform
+# Nexo — AI-Driven 5G Handover Intelligence Platform
 
 **Real-time 5G handover prediction and network monitoring powered by a four-stage AI pipeline.**
 
@@ -19,7 +19,7 @@ PIDATA – 4DATA | Academic Year 2025–2026
 
 ## Overview
 
-CellPilot is an end-to-end MLOps platform that predicts, in real time, when a 5G device should switch (hand over) from one cell tower to a better one — before the signal degrades.
+Nexo is an end-to-end MLOps platform that predicts, in real time, when a 5G device should switch (hand over) from one cell tower to a better one — before the signal degrades.
 
 The system was trained on **199,990 real 5G measurements** collected in the Ruhr region, Germany, and visualizes live inference results on an interactive map with real cell tower positions and moving virtual user devices.
 

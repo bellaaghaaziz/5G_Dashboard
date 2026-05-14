@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../context/auth";
+import { NexoLogo } from "../components";
 
 const DEMO_USERS = [
   { label: "Admin", email: "admin@5g.local", password: "admin12345", color: "#ef4444", icon: "⚙️" },
@@ -58,13 +59,8 @@ export function LoginPage() {
 
         {/* Logo */}
         <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 12,
-            background: "linear-gradient(135deg,#22d3ee,#3b82f6)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontWeight: 900, fontSize: 14, color: "#fff",
-          }}>5G</div>
-          <span style={{ fontWeight: 800, fontSize: 20, letterSpacing: -0.5 }}>CellPilot</span>
+          <NexoLogo size={40} />
+          <span style={{ fontWeight: 800, fontSize: 20, letterSpacing: -0.5 }}>Nexo</span>
           <button onClick={() => navigate("/")} style={{
             marginLeft: "auto", fontSize: 13, color: "#475569", background: "none",
             border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 500,

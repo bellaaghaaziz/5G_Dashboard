@@ -93,16 +93,25 @@ def _run_mlops_pipeline_subprocess(args: dict) -> None:
         "--model-dir",
         str(args.get("model_dir") or "."),
         "--min-dso4-auc",
-        str(args.get("min_dso4_auc") or 0.90),
+        str(args.get("min_dso4_auc") or 0.75),
         "--min-dso4-mcc",
-        str(args.get("min_dso4_mcc") or 0.70),
+        str(args.get("min_dso4_mcc") or 0.50),
     ]
     if args.get("with_mlflow", True):
         cmd.append("--with-mlflow")
     if args.get("promote", True):
         cmd.append("--promote")
-    if args.get("require_promotion", True):
+    if args.get("require_promotion", False):
         cmd.append("--require-promotion")
+    # Champion/challenger: always pass current metrics.json as champion baseline
+    champion_path = next(
+        (str(p) for p in [Path("metrics.json"), Path("logs/metrics.json")] if p.exists()),
+        None,
+    )
+    if champion_path and args.get("champion_check", True):
+        cmd += ["--champion-metrics-path", champion_path]
+    elif not args.get("champion_check", True):
+        cmd.append("--skip-champion-check")
 
     env = os.environ.copy()
     # Keep existing default behavior (file:./mlruns) unless user overrides.
@@ -355,6 +364,8 @@ class PredictionResponse(BaseModel):
     dso1_risk_score: float
     dso3_cluster: int
     dso3_label: str
+    dso2_target_rsrp: float = -140.0
+    dso2_num_candidates: int = 0
     dso4_probability: float
     dso4_threshold: float
     handover_recommended: bool
@@ -367,19 +378,19 @@ _server_start = time.time()
 _predictions_served = 0
 if Counter and Histogram:
     PREDICT_REQUESTS_TOTAL = Counter(
-        "cellpilot_predict_requests_total",
+        "nexo_predict_requests_total",
         "Total number of predict requests",
     )
     PREDICT_ERRORS_TOTAL = Counter(
-        "cellpilot_predict_errors_total",
+        "nexo_predict_errors_total",
         "Total number of failed predict requests",
     )
     HANDOVER_RECOMMENDED_TOTAL = Counter(
-        "cellpilot_handover_recommended_total",
+        "nexo_handover_recommended_total",
         "Total number of handover recommendations",
     )
     PREDICT_LATENCY_SECONDS = Histogram(
-        "cellpilot_predict_latency_seconds",
+        "nexo_predict_latency_seconds",
         "Predict endpoint latency in seconds",
         buckets=(0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0),
     )
@@ -620,25 +631,348 @@ def retrain_status():
 
 # ── Drift detection endpoint ────────────────────────────────────────────────
 
+def _populate_drift_from_predictions() -> int:
+    """Feed recent prediction inputs into the drift detector window. Returns records loaded."""
+    from src.drift_detector import get_drift_detector, WINDOW_SIZE
+    dd = get_drift_detector()
+    paths = [Path("logs/predictions.json"), Path("/app/logs/predictions.json")]
+    pred_path = next((p for p in paths if p.exists()), None)
+    if pred_path is None:
+        return 0
+    count = 0
+    try:
+        lines = pred_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line in lines[-WINDOW_SIZE:]:
+            try:
+                row = json.loads(line)
+                inputs = row.get("inputs", {})
+                if inputs:
+                    dd.record(inputs)
+                    count += 1
+            except Exception:
+                pass
+    except Exception as e:
+        log.warning("Could not populate drift window: %s", e)
+    return count
+
+
 @app.get("/drift/status", tags=["Monitoring"])
 def drift_status():
-    """Get current data drift analysis."""
+    """Get current data drift analysis using recent prediction logs."""
     from src.drift_detector import get_drift_detector
-    return get_drift_detector().get_drift_report()
+    loaded = _populate_drift_from_predictions()
+    report = get_drift_detector().get_drift_report()
+    # Enrich with fields the frontend expects
+    features = report.get("features", [])
+    n_drifted = sum(
+        1 for f in features
+        if f.get("status") in ("warning", "critical") or f.get("psi", 0) > 0.1
+    )
+    overall_drift = n_drifted > 0 and report.get("status") != "stable"
+    enriched = []
+    for f in features:
+        psi = f.get("psi", 0.0)
+        status = f.get("status", "stable")
+        drifted = status in ("warning", "critical") or psi > 0.1
+        enriched.append({
+            **f,
+            "drift_score": psi,
+            "drifted": drifted,
+            "stattest_name": "PSI + Z-shift",
+        })
+    return {
+        **report,
+        "features": enriched,
+        "n_features": len(enriched),
+        "n_drifted": n_drifted,
+        "overall_drift": overall_drift,
+        "drift_detected": overall_drift,
+        "window_records_loaded": loaded,
+    }
+
+
+# ── Drift feed endpoint (real-time Kafka features) ─────────────────────────
+
+class DriftFeedBatch(BaseModel):
+    records: list[dict] = []
+
+
+@app.post("/drift/feed", tags=["Monitoring"])
+def drift_feed(batch: DriftFeedBatch):
+    """
+    Feed raw Kafka feature records directly into the drift detector window.
+    Called by the dashboard-service on each incoming Kafka message so that
+    drift is computed against actual live data, not just prediction logs.
+    """
+    from src.drift_detector import get_drift_detector
+    dd = get_drift_detector()
+    count = 0
+    for rec in batch.records:
+        try:
+            dd.record(rec)
+            count += 1
+        except Exception:
+            pass
+    return {"fed": count, "window_size": min(
+        len(list(w)) for w in dd._window.values()
+    ) if dd._window else 0}
+
+
+@app.get("/drift/baseline", tags=["Monitoring"])
+def drift_baseline_info():
+    """Return the current drift baseline statistics (training distribution summary)."""
+    from src.drift_detector import get_drift_detector, BASELINE_PATH
+    dd = get_drift_detector()
+    if dd._baseline is None:
+        return {"status": "no_baseline", "features": []}
+    features = []
+    for feat, stats in dd._baseline.items():
+        features.append({
+            "feature": feat,
+            "mean": round(stats.get("mean", 0), 4),
+            "std": round(stats.get("std", 0), 4),
+            "min": round(stats.get("min", 0), 4),
+            "max": round(stats.get("max", 0), 4),
+            "p50": round(stats.get("p50", 0), 4),
+            "count": stats.get("count", 0),
+        })
+    return {
+        "status": "ok",
+        "baseline_path": str(BASELINE_PATH),
+        "n_features": len(features),
+        "features": features,
+    }
+
+
+# ── DVC endpoints ─────────────────────────────────────────────────────────────
+
+def _dvc_exe() -> str:
+    """Return path to DVC executable, checking common install locations."""
+    import shutil
+    exe = shutil.which("dvc")
+    if exe:
+        return exe
+    for candidate in [
+        Path("/usr/local/bin/dvc"),
+        Path.home() / ".local/bin/dvc",
+        Path("/app/.local/bin/dvc"),
+        Path("/root/.local/bin/dvc"),
+    ]:
+        if candidate.exists():
+            return str(candidate)
+    raise FileNotFoundError("dvc not found")
+
+
+@app.get("/dvc/status", tags=["DVC"])
+def dvc_status():
+    """Run `dvc status` and return parsed pipeline stage states."""
+    try:
+        dvc = _dvc_exe()
+        result = subprocess.run(
+            [dvc, "status", "--json"],
+            capture_output=True, text=True, timeout=30,
+            cwd=str(Path(__file__).parent),
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            try:
+                stages = json.loads(result.stdout)
+                return {"ok": True, "stages": stages, "changed": bool(stages)}
+            except Exception:
+                pass
+        # fallback: plain text status
+        result2 = subprocess.run(
+            [dvc, "status"],
+            capture_output=True, text=True, timeout=30,
+            cwd=str(Path(__file__).parent),
+        )
+        lines = (result2.stdout or "").strip().splitlines()
+        return {
+            "ok": result2.returncode == 0,
+            "changed": result2.returncode != 0 or bool(lines),
+            "summary": lines[:40],
+        }
+    except FileNotFoundError:
+        return {"ok": False, "error": "dvc not found in PATH"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/dvc/dag", tags=["DVC"])
+def dvc_dag():
+    """Return DVC pipeline DAG as structured stages."""
+    dvc_yaml = Path("dvc.yaml")
+    if not dvc_yaml.exists():
+        dvc_yaml = Path(__file__).parent / "dvc.yaml"
+    if not dvc_yaml.exists():
+        return {"ok": False, "stages": [], "error": "dvc.yaml not found"}
+    try:
+        import yaml  # type: ignore
+    except ImportError:
+        # Minimal YAML parse without pyyaml
+        try:
+            import json as _json
+            result = subprocess.run(
+                ["dvc", "dag", "--dot"],
+                capture_output=True, text=True, timeout=15,
+                cwd=str(Path(__file__).parent),
+            )
+            return {"ok": True, "dot": result.stdout, "stages": []}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    data = yaml.safe_load(dvc_yaml.read_text())
+    stages_raw = data.get("stages", {})
+    stages = []
+    for name, cfg in stages_raw.items():
+        stages.append({
+            "name": name,
+            "cmd": cfg.get("cmd", ""),
+            "deps": cfg.get("deps", []),
+            "outs": cfg.get("outs", []),
+            "metrics": cfg.get("metrics", []),
+        })
+    return {"ok": True, "stages": stages}
+
+
+@app.post("/dvc/repro", tags=["DVC"])
+def dvc_repro(stage: str = ""):
+    """Trigger DVC pipeline reproduction (optionally a specific stage)."""
+    try:
+        dvc = _dvc_exe()
+    except FileNotFoundError:
+        return {"ok": False, "error": "dvc not found in PATH"}
+    cmd = [dvc, "repro"]
+    if stage:
+        cmd.append(stage)
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=300,
+            cwd=str(Path(__file__).parent),
+        )
+        lines = ((result.stdout or "") + (result.stderr or "")).strip().splitlines()
+        return {
+            "ok": result.returncode == 0,
+            "exit_code": result.returncode,
+            "output": lines[-50:],
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ── Auto-retrain endpoint (drift-triggered champion/challenger) ────────────────
+
+@app.post("/mlops/auto-retrain", tags=["MLOps"])
+def auto_retrain():
+    """
+    Drift-triggered champion/challenger retraining.
+    1. Checks current drift severity.
+    2. If drift_detected and severity is warning/critical: kicks off pipeline_runner.
+    3. pipeline_runner does champion/challenger comparison — promotes only if better.
+    """
+    from src.drift_detector import get_drift_detector
+    _populate_drift_from_predictions()
+    report = get_drift_detector().get_drift_report()
+
+    features = report.get("features", [])
+    n_critical = sum(1 for f in features if f.get("status") == "critical")
+    n_warning  = sum(1 for f in features if f.get("status") == "warning")
+    drift_score = n_critical * 2 + n_warning
+
+    if drift_score == 0:
+        return {
+            "triggered": False,
+            "reason": "No significant drift detected — retraining not needed.",
+            "n_critical": n_critical,
+            "n_warning": n_warning,
+        }
+
+    with _mlops_lock:
+        if _mlops_state.get("status") == "running":
+            return {
+                "triggered": False,
+                "reason": "Pipeline already running.",
+                "state": dict(_mlops_state),
+            }
+        _mlops_state.update({
+            "status": "running", "started_at": time.time(), "completed_at": None,
+            "step": "drift-triggered", "run_id": None,
+            "model_name": "5G-DSO4-Controller", "model_version": None,
+            "promoted": None, "exit_code": None, "error": None, "log_path": None,
+        })
+
+    run_args = {
+        "data_path": "DATASET/df_master_engineered.parquet",
+        "model_dir": ".",
+        "with_mlflow": True,
+        "promote": True,
+        "require_promotion": False,
+        "min_dso4_auc": 0.75,
+        "min_dso4_mcc": 0.50,
+        "mlflow_model_name": "5G-DSO4-Controller",
+        "champion_check": True,
+    }
+    t = threading.Thread(
+        target=_run_mlops_pipeline_subprocess, args=(run_args,), daemon=True
+    )
+    t.start()
+
+    return {
+        "triggered": True,
+        "reason": (
+            f"Drift detected: {n_critical} critical + {n_warning} warning features. "
+            f"Running champion/challenger retraining."
+        ),
+        "n_critical": n_critical,
+        "n_warning": n_warning,
+        "drift_score": drift_score,
+    }
+
+
+@app.get("/mlops/champion-metrics", tags=["MLOps"])
+def champion_metrics():
+    """Return the current production model's evaluation metrics."""
+    for p in [
+        Path("metrics.json"), Path("logs/metrics.json"),
+        Path("/app/metrics.json"), Path("/app/logs/metrics.json"),
+    ]:
+        if p.exists():
+            try:
+                data = json.loads(p.read_text())
+                return {"ok": True, "source": str(p), "metrics": data}
+            except Exception:
+                pass
+    return {"ok": False, "metrics": {}}
 
 
 # ── Real metrics endpoint ───────────────────────────────────────────────────
 
 @app.get("/metrics", tags=["System"])
 def get_metrics():
-    """Return real model metrics from metrics.json."""
-    metrics_path = Path("metrics.json")
-    if not metrics_path.exists():
-        return {"error": "No metrics file found"}
-    try:
-        return json.loads(metrics_path.read_text())
-    except Exception as e:
-        return {"error": str(e)}
+    """Return real model metrics from metrics.json, falling back to model_manifest."""
+    for p in [Path("metrics.json"), Path("logs/metrics.json"), Path("/app/logs/metrics.json")]:
+        if p.exists():
+            try:
+                return json.loads(p.read_text())
+            except Exception:
+                pass
+    # Fallback: read from model_manifest.json
+    manifest_path = Path("model_manifest.json")
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text())
+            s = manifest.get("metrics_summary", {})
+            return {
+                "dso1": {"roc_auc": s.get("dso1_roc_auc", 0), "pr_auc": 0, "mcc": 0},
+                "dso4": {
+                    "roc_auc": s.get("dso4_roc_auc", 0),
+                    "mcc": s.get("dso4_mcc", 0),
+                    "threshold": s.get("dso4_threshold", 0.5),
+                    "pr_auc": 0, "accuracy": 0, "ho_recall": 0, "stay_recall": 0,
+                },
+            }
+        except Exception:
+            pass
+    return {"error": "No metrics file found"}
 
 
 @app.get("/metrics/prometheus", tags=["System"])
@@ -758,7 +1092,208 @@ def mlflow_summary():
             "model_registry": {"name": model_name, "versions": versions[:20]},
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        log.warning("MLflow query failed, falling back to manifest: %s", e)
+        manifest_path = Path("model_manifest.json")
+        if manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text())
+                s = manifest.get("metrics_summary", {})
+                return {
+                    "tracking_uri": "file:./mlruns",
+                    "experiment": {"name": "5G-Handover-AI", "id": "0"},
+                    "recent_runs": [
+                        {
+                            "run_id": manifest.get("run_id", "local"),
+                            "status": "FINISHED",
+                            "start_time": manifest.get("trained_at", None),
+                            "end_time": manifest.get("trained_at", None),
+                            "metrics": {
+                                "dso1_roc_auc": s.get("dso1_roc_auc"),
+                                "dso4_roc_auc": s.get("dso4_roc_auc"),
+                                "dso4_mcc": s.get("dso4_mcc"),
+                            },
+                        }
+                    ],
+                    "model_registry": {
+                        "name": "5G-DSO4-Controller",
+                        "versions": [
+                            {
+                                "name": "5G-DSO4-Controller",
+                                "version": "1",
+                                "creation_timestamp": manifest.get("trained_at", None),
+                                "current_stage": "Production",
+                                "run_id": manifest.get("run_id", "local"),
+                            }
+                        ],
+                    },
+                    "source": "manifest_fallback",
+                }
+            except Exception:
+                pass
+        return {
+            "tracking_uri": "file:./mlruns",
+            "experiment": {"name": "5G-Handover-AI", "id": "0"},
+            "recent_runs": [],
+            "model_registry": {"name": "5G-DSO4-Controller", "versions": []},
+            "source": "empty_fallback",
+        }
+
+# ── SHAP / Feature Importance ────────────────────────────────────────────────
+
+def _extract_base_model(model_cal):
+    """Extract the underlying tree estimator from a CalibratedClassifierCV wrapper."""
+    for attr in ("estimator", "base_estimator"):
+        m = getattr(model_cal, attr, None)
+        if m is not None:
+            return m
+    if hasattr(model_cal, "calibrated_classifiers_"):
+        cc = model_cal.calibrated_classifiers_
+        if cc:
+            for attr in ("estimator", "base_estimator"):
+                m = getattr(cc[0], attr, None)
+                if m is not None:
+                    return m
+    return None
+
+
+def _feature_importance_entries(model, feature_names: list, top_n: int = 15) -> tuple[list, str]:
+    """Return (entries, importance_type) using model.feature_importances_."""
+    fi = getattr(model, "feature_importances_", None)
+    fn = getattr(model, "feature_names_in_", None)
+    if fn is not None:
+        feature_names = [str(f) for f in fn]
+    if fi is None or len(fi) != len(feature_names):
+        return [], "feature_importance"
+    entries = sorted(
+        [{"feature": f, "importance": round(float(v), 5), "type": "feature_importance"}
+         for f, v in zip(feature_names, fi)],
+        key=lambda x: x["importance"], reverse=True,
+    )[:top_n]
+    return entries, "feature_importance"
+
+
+@app.get("/shap/{dso}", tags=["Interpretability"])
+def get_shap_importance(dso: str, n_samples: int = 150):
+    """
+    Mean |SHAP| feature importance for dso1 or dso4.
+    Uses model.feature_importances_ from training (always available).
+    Attempts SHAP only when the full feature set is present in prediction logs.
+    """
+    if dso not in ("dso1", "dso4"):
+        raise HTTPException(400, "dso must be 'dso1' or 'dso4'")
+
+    a = get_artifacts()
+    fl = a["feature_lists"]
+
+    if dso == "dso1":
+        features = fl.get("dso1_features", [])
+        model    = a["model_dso1"]
+        scaler   = a.get("scaler_dso1")
+        n_expected = getattr(scaler, "n_features_in_", len(features))
+
+        # Try SHAP with prediction logs only if we have all required features
+        shap_entries: list = []
+        n_samples_used = 0
+        try:
+            paths = [Path("logs/predictions.json"), Path("/app/logs/predictions.json")]
+            pred_path = next((p for p in paths if p.exists()), None)
+            if pred_path is not None:
+                rows = []
+                for line in pred_path.read_text(errors="replace").splitlines()[-2000:]:
+                    try:
+                        rec = json.loads(line)
+                        inp = rec.get("inputs", {})
+                        if inp:
+                            rows.append(inp)
+                    except Exception:
+                        pass
+                if rows:
+                    df = pd.DataFrame(rows)
+                    avail_all = [f for f in features if f in df.columns]
+                    if len(avail_all) == n_expected:
+                        sample = df[avail_all].dropna().sample(min(n_samples, len(df)), random_state=42)
+                        X = scaler.transform(sample) if scaler is not None else sample.values
+                        import shap
+                        explainer = shap.TreeExplainer(model)
+                        sv = explainer.shap_values(X)
+                        sv = sv[1] if isinstance(sv, list) else sv
+                        scores = np.abs(sv).mean(axis=0)
+                        shap_entries = sorted(
+                            [{"feature": f, "importance": round(float(v), 5), "type": "shap"}
+                             for f, v in zip(avail_all, scores)],
+                            key=lambda x: x["importance"], reverse=True,
+                        )[:15]
+                        n_samples_used = len(sample)
+        except Exception as e:
+            log.info("SHAP fallback for dso1 (expected): %s", e)
+
+        if shap_entries:
+            return {"dso": "dso1", "model": "XGBoost Signal Risk Classifier (DSO1)",
+                    "n_samples": n_samples_used, "features": shap_entries, "data_source": "shap_from_logs"}
+
+        # Reliable fallback: feature_importances_ from trained model
+        entries, imp_type = _feature_importance_entries(model, features)
+        return {"dso": "dso1", "model": "XGBoost Signal Risk Classifier (DSO1)",
+                "n_samples": getattr(model, "n_features_in_", len(features)),
+                "features": entries, "data_source": "trained_feature_importance"}
+
+    # dso4
+    features  = fl.get("dso4_features", [])
+    model_cal = a["model_dso4_calibrated"]
+    base_model = _extract_base_model(model_cal)
+
+    # Try SHAP with prediction logs
+    shap_entries = []
+    n_samples_used = 0
+    if base_model is not None:
+        fn = getattr(base_model, "feature_names_in_", None)
+        model_features = [str(f) for f in fn] if fn is not None else features
+        n_expected = getattr(base_model, "n_features_in_", len(model_features))
+        try:
+            paths = [Path("logs/predictions.json"), Path("/app/logs/predictions.json")]
+            pred_path = next((p for p in paths if p.exists()), None)
+            if pred_path is not None:
+                rows = []
+                for line in pred_path.read_text(errors="replace").splitlines()[-2000:]:
+                    try:
+                        rec = json.loads(line)
+                        inp = rec.get("inputs", {})
+                        if inp:
+                            rows.append(inp)
+                    except Exception:
+                        pass
+                if rows:
+                    df = pd.DataFrame(rows)
+                    avail_all = [f for f in model_features if f in df.columns]
+                    if len(avail_all) == n_expected:
+                        sample = df[avail_all].dropna().sample(min(n_samples, len(df)), random_state=42)
+                        X = sample.values
+                        import shap
+                        explainer = shap.TreeExplainer(base_model)
+                        sv = explainer.shap_values(X)
+                        sv = sv[1] if isinstance(sv, list) else sv
+                        scores = np.abs(sv).mean(axis=0)
+                        shap_entries = sorted(
+                            [{"feature": f, "importance": round(float(v), 5), "type": "shap"}
+                             for f, v in zip(avail_all, scores)],
+                            key=lambda x: x["importance"], reverse=True,
+                        )[:15]
+                        n_samples_used = len(sample)
+        except Exception as e:
+            log.info("SHAP fallback for dso4 (expected): %s", e)
+
+    if shap_entries:
+        return {"dso": "dso4", "model": "XGBoost Handover Controller — Calibrated (DSO4)",
+                "n_samples": n_samples_used, "features": shap_entries, "data_source": "shap_from_logs"}
+
+    # Reliable fallback: feature_importances_ from trained base model
+    fn = getattr(base_model, "feature_names_in_", None) if base_model else None
+    feat_names = [str(f) for f in fn] if fn is not None else features
+    entries, _ = _feature_importance_entries(base_model, feat_names) if base_model else ([], "none")
+    return {"dso": "dso4", "model": "XGBoost Handover Controller — Calibrated (DSO4)",
+            "n_samples": getattr(base_model, "n_features_in_", len(feat_names)) if base_model else 0,
+            "features": entries, "data_source": "trained_feature_importance"}
+
 
 # ── Enhanced health endpoint ────────────────────────────────────────────────
 

@@ -146,7 +146,7 @@ def _champion_challenger(challenger: dict, champion: dict) -> tuple[bool, str]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
-    parser = argparse.ArgumentParser(description="CellPilot — End-to-End MLOps Pipeline Runner")
+    parser = argparse.ArgumentParser(description="Nexo — End-to-End MLOps Pipeline Runner")
     parser.add_argument("--data-path", default="DATASET/df_master_engineered.parquet")
     parser.add_argument("--model-dir", default=".")
     parser.add_argument("--with-mlflow", action="store_true")
