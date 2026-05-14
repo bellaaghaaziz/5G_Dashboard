@@ -11,7 +11,7 @@ import { api } from "../api/client";
 export function Chatbot() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([
-    { role: "assistant", content: "Hello! I am CellPilot AI. How can I assist you with analyzing your 5G network or generating a report?" }
+    { role: "assistant", content: "Hello! I am Nexo AI. How can I assist you with analyzing your 5G network or generating a report?" }
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -73,7 +73,7 @@ export function Chatbot() {
           <Box sx={{ p: 2, bgcolor: "primary.main", color: "primary.contrastText", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <Stack direction="row" spacing={1} alignItems="center">
               <SmartToyRoundedIcon />
-              <Typography variant="h6" sx={{ fontSize: 16 }}>CellPilot AI</Typography>
+              <Typography variant="h6" sx={{ fontSize: 16 }}>Nexo AI</Typography>
             </Stack>
             <IconButton size="small" onClick={() => setOpen(false)} sx={{ color: "inherit" }}>
               <CloseRoundedIcon />

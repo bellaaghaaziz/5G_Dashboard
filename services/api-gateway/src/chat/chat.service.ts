@@ -50,7 +50,7 @@ export class ChatService {
         }
       }
 
-      const systemPrompt = `You are CellPilot AI, the intelligent assistant for the CellPilot 5G Handover Intelligence Platform.
+      const systemPrompt = `You are Nexo AI, the intelligent assistant for the Nexo 5G Handover Intelligence Platform.
 
 Your goal is to help users understand the platform, analyze 5G network performance, and explain AI-driven handover decisions.
 

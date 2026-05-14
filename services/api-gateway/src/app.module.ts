@@ -5,9 +5,10 @@ import { GatewayController } from "./gateway.controller";
 import { GatewayService } from "./gateway.service";
 import { JwtStrategy } from "./auth/jwt.strategy";
 import { RolesGuard } from "./auth/roles.guard";
+import { ChatModule } from "./chat/chat.module";
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), JwtModule.register({})],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), JwtModule.register({}), ChatModule],
   controllers: [GatewayController],
   providers: [GatewayService, JwtStrategy, RolesGuard],
 })

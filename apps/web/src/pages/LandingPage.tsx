@@ -224,7 +224,7 @@ export function LandingPage() {
           <p style={{ color: "#64748b", fontSize: 17, marginBottom: 48, lineHeight: 1.7 }}>Have questions about the platform or want to collaborate? We'd love to hear from you.</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {[
-              { l: "Email", v: "cellpilot@gmail.com", icon: "✉️" },
+              { l: "Email", v: "nexo@gmail.com", icon: "✉️" },
               { l: "Project", v: "5G AI Handover Platform — Research", icon: "🎓" },
               { l: "GitHub", v: "github.com/bellaaghaaziz/Esprit-PIDATA-4DATA-2025-2026-Nexo", icon: "💻" },
             ].map(c => (
