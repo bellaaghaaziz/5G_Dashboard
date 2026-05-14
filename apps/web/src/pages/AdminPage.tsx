@@ -63,6 +63,17 @@ export function AdminPage() {
     return () => clearInterval(id);
   }, []);
 
+  async function deleteUser(id: string) {
+    setError(null); setSuccess(null);
+    try {
+      await api.delete(`/admin/users/${id}`);
+      setSuccess("User deleted.");
+      await loadUsers();
+    } catch (err: any) {
+      setError(err?.response?.data?.message || err?.message || "Failed to delete user");
+    }
+  }
+
   async function createUser(e: React.FormEvent) {
     e.preventDefault();
     setError(null); setSuccess(null);
@@ -196,7 +207,12 @@ export function AdminPage() {
                         <Typography variant="caption" sx={{ color: "text.secondary" }}>{user.email}</Typography>
                       </Box>
                     </Stack>
-                    <Chip label={user.role?.replace("_", " ")} color={roleColors[user.role] ?? "default"} size="small" sx={{ fontWeight: 700, textTransform: "capitalize" }} />
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Chip label={user.role?.replace("_", " ")} color={roleColors[user.role] ?? "default"} size="small" sx={{ fontWeight: 700, textTransform: "capitalize" }} />
+                      <IconButton size="small" onClick={() => deleteUser(user.id)} sx={{ color: "rgba(239,68,68,0.6)", "&:hover": { color: "#ef4444", background: "rgba(239,68,68,0.1)" } }}>
+                        <DeleteRoundedIcon fontSize="small" />
+                      </IconButton>
+                    </Stack>
                   </Stack>
                 ))}
               </Stack>

@@ -1,8 +1,8 @@
 import os
 import json
+import subprocess
 import pandas as pd
 from kafka import KafkaConsumer
-from datetime import datetime
 
 # Kafka setup
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:9092")
@@ -50,8 +50,17 @@ if __name__ == '__main__':
                 print(f"📦 Threshold reached. Appending {BATCH_SIZE} rows to {DATA_PATH}")
                 df = pd.DataFrame(buffer)
                 df.to_csv(DATA_PATH, mode='a', header=False, index=False)
-                buffer = [] # Reset buffer
-                print(f"✅ Data written. Ready for DVC Pull in Airflow Pipeline!")
+                buffer = []
+                print(f"Data written. Triggering DVC pipeline...")
+                try:
+                    subprocess.Popen(
+                        ["dvc", "repro", "ingest"],
+                        cwd="/app",
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                except FileNotFoundError:
+                    pass  # dvc not installed in this container
 
     except KeyboardInterrupt:
         print("Consumer Interrupted.")

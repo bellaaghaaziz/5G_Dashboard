@@ -6,5 +6,11 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: Number(process.env.REACT_APP_PORT ?? 5173),
+    allowedHosts: "all",
+  },
+  preview: {
+    host: "0.0.0.0",
+    port: 5173,
+    allowedHosts: true,
   },
 });

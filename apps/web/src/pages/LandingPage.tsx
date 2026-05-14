@@ -54,7 +54,6 @@ export function LandingPage() {
 
       {/* ── HERO ── */}
       <section style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", padding: "120px 24px 80px" }}>
-        {/* Background grid */}
         <div style={{
           position: "absolute", inset: 0, zIndex: 0,
           backgroundImage: `
@@ -62,7 +61,6 @@ export function LandingPage() {
             linear-gradient(90deg, rgba(34,211,238,0.03) 1px, transparent 1px)`,
           backgroundSize: "60px 60px",
         }} />
-        {/* Glow orbs */}
         <div style={{ position: "absolute", top: "15%", left: "15%", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(34,211,238,0.07) 0%, transparent 70%)", pointerEvents: "none" }} />
         <div style={{ position: "absolute", bottom: "15%", right: "15%", width: 400, height: 400, borderRadius: "50%", background: "radial-gradient(circle, rgba(168,85,247,0.07) 0%, transparent 70%)", pointerEvents: "none" }} />
 
@@ -80,12 +78,12 @@ export function LandingPage() {
             fontSize: "clamp(42px,6vw,80px)", fontWeight: 900, lineHeight: 1.08,
             letterSpacing: -2, marginBottom: 24,
           }}>
-            <span style={{ background: "linear-gradient(135deg,#f1f5f9,#94a3b8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>The Intelligence Layer</span>
+            <span style={{ background: "linear-gradient(135deg,#f1f5f9,#94a3b8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Smarter Connections</span>
             <br />
             <span style={{ background: "linear-gradient(135deg,#22d3ee,#3b82f6,#a855f7)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>for 5G Networks</span>
           </h1>
           <p style={{ fontSize: 19, color: "#64748b", lineHeight: 1.75, maxWidth: 620, margin: "0 auto 48px", fontWeight: 400 }}>
-            Real-time handover prediction, network state profiling, and automated decision-making powered by a four-stage DSO machine learning pipeline.
+            An AI system that watches your 5G network around the clock and automatically keeps every device connected to the best available tower — before the signal drops.
           </p>
           <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
             <button onClick={() => navigate("/login")} style={{
@@ -97,7 +95,7 @@ export function LandingPage() {
             }}
               onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 0 60px rgba(34,211,238,0.45)"; }}
               onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 0 40px rgba(34,211,238,0.3)"; }}>
-              Launch Dashboard
+              Open Dashboard
             </button>
             <a href="#about" style={{
               padding: "15px 36px", borderRadius: 12,
@@ -115,10 +113,10 @@ export function LandingPage() {
           {/* Stats row */}
           <div style={{ display: "flex", gap: 48, justifyContent: "center", marginTop: 72, flexWrap: "wrap" }}>
             {[
-              { n: "97.9%", l: "DSO4 ROC AUC" },
-              { n: "~30ms", l: "Inference Latency" },
-              { n: "200K+", l: "Training Samples" },
-              { n: "4-Stage", l: "DSO Pipeline" },
+              { n: "Real-time", l: "Live Monitoring" },
+              { n: "~30ms", l: "Response Time" },
+              { n: "200K+", l: "Data Points Analyzed" },
+              { n: "4", l: "Network Scenarios" },
             ].map(s => (
               <div key={s.l} style={{ textAlign: "center" }}>
                 <div style={{ fontSize: 28, fontWeight: 900, background: "linear-gradient(135deg,#22d3ee,#a855f7)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{s.n}</div>
@@ -133,30 +131,30 @@ export function LandingPage() {
       <section id="features" style={{ padding: "120px 48px" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
           <div style={{ textAlign: "center", marginBottom: 72 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#22d3ee", letterSpacing: 3, textTransform: "uppercase", marginBottom: 16 }}>Platform Features</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#22d3ee", letterSpacing: 3, textTransform: "uppercase", marginBottom: 16 }}>What's Inside</div>
             <h2 style={{ fontSize: 44, fontWeight: 900, letterSpacing: -1.5, marginBottom: 16 }}>
-              Built for <span style={{ background: "linear-gradient(135deg,#22d3ee,#3b82f6)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Telecom Professionals</span>
+              Three views, <span style={{ background: "linear-gradient(135deg,#22d3ee,#3b82f6)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>one platform</span>
             </h2>
-            <p style={{ color: "#64748b", fontSize: 17, maxWidth: 520, margin: "0 auto" }}>Three dedicated workspaces for every role in the network operations team.</p>
+            <p style={{ color: "#64748b", fontSize: 17, maxWidth: 520, margin: "0 auto" }}>Each section of the platform is built for a specific person and purpose.</p>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 24 }}>
             {[
               {
-                icon: "📡", title: "Network Operations Center",
-                desc: "Live 5G topology map with real-time UE movement, congestion pulsing, handover recommendations, and playback controls.",
-                tags: ["Live Map", "HO Alerts", "Replay"],
+                icon: "📡", title: "Live Network Map",
+                desc: "Watch your devices move across the city in real time. The AI automatically switches each one to the strongest nearby tower — you can see every decision as it happens.",
+                tags: ["Live Map", "Auto Alerts", "Replay"],
                 color: "#22d3ee",
               },
               {
-                icon: "🧬", title: "Intelligence Lab",
-                desc: "Full DSO pipeline metrics, in-app model retraining with live progress, and PSI-based data drift detection.",
-                tags: ["AUC 0.979", "Live Retrain", "Drift PSI"],
+                icon: "📊", title: "AI Results",
+                desc: "A simple view of how well the AI has been doing its job. Is it making good calls? Is anything worth investigating? No technical knowledge needed to understand it.",
+                tags: ["Accuracy", "Health Status", "Trends"],
                 color: "#a855f7",
               },
               {
-                icon: "⚙️", title: "Admin Console",
-                desc: "Service health monitoring for all microservices, user management with role-based access, and system diagnostics.",
-                tags: ["RBAC", "Health Checks", "User Mgmt"],
+                icon: "⚙️", title: "Admin",
+                desc: "Add and remove users, assign them what they're allowed to do, and keep an eye on whether all parts of the system are running correctly.",
+                tags: ["User Management", "Access Control", "System Status"],
                 color: "#f59e0b",
               },
             ].map(f => (
@@ -187,73 +185,33 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ── DSO PIPELINE ── */}
-      <section style={{ padding: "80px 48px", background: "rgba(255,255,255,0.01)", borderTop: "1px solid rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto", textAlign: "center" }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#a855f7", letterSpacing: 3, textTransform: "uppercase", marginBottom: 16 }}>AI Pipeline</div>
-          <h2 style={{ fontSize: 38, fontWeight: 900, letterSpacing: -1, marginBottom: 56 }}>Four-Stage DSO Architecture</h2>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0, flexWrap: "wrap" }}>
-            {[
-              { id: "DSO1", name: "Signal Risk", desc: "XGBoost\nAUC 0.892", color: "#22d3ee" },
-              { id: "DSO2", name: "Cell Ranking", desc: "XGBoost\nCandidate Sort", color: "#3b82f6" },
-              { id: "DSO3", name: "Net Cluster", desc: "KMeans + LR\n4 Profiles", color: "#a855f7" },
-              { id: "DSO4", name: "HO Decision", desc: "Calibrated XGB\nAUC 0.979", color: "#22c55e" },
-            ].map((s, i) => (
-              <div key={s.id} style={{ display: "flex", alignItems: "center" }}>
-                <div style={{
-                  padding: "20px 28px", borderRadius: 16,
-                  background: `${s.color}12`, border: `1px solid ${s.color}35`,
-                  textAlign: "center", minWidth: 140,
-                }}>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: s.color, marginBottom: 4 }}>{s.id}</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>{s.name}</div>
-                  <div style={{ fontSize: 11, color: "#475569", whiteSpace: "pre-line", lineHeight: 1.5 }}>{s.desc}</div>
-                </div>
-                {i < 3 && <div style={{ color: "#1e3a5f", fontSize: 20, margin: "0 8px" }}>→</div>}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* ── ABOUT ── */}
-      <section id="about" style={{ padding: "120px 48px" }}>
+      <section id="about" style={{ padding: "120px 48px", background: "rgba(255,255,255,0.01)", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 80, alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#22d3ee", letterSpacing: 3, textTransform: "uppercase", marginBottom: 20 }}>About the Project</div>
             <h2 style={{ fontSize: 42, fontWeight: 900, letterSpacing: -1.5, lineHeight: 1.1, marginBottom: 24 }}>
-              Advancing 5G with <span style={{ background: "linear-gradient(135deg,#22d3ee,#a855f7)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Predictive AI</span>
+              Built to make 5G <span style={{ background: "linear-gradient(135deg,#22d3ee,#a855f7)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>smarter</span>
             </h2>
             <p style={{ color: "#64748b", lineHeight: 1.8, fontSize: 16, marginBottom: 20 }}>
-              CellPilot is a research-grade MLOps platform built to solve one of the hardest problems in 5G networks: predicting and optimizing handover decisions before signal degradation occurs.
+              CellPilot is a research platform that uses AI to solve a real problem in 5G networks: keeping every device connected to the right tower at the right time, without any manual intervention.
             </p>
-            <p style={{ color: "#64748b", lineHeight: 1.8, fontSize: 16, marginBottom: 32 }}>
-              Trained on 200,000+ real-world measurements across mobile, stationary, and high-speed rail scenarios, the platform delivers sub-30ms inference through a four-stage DSO chain deployed as production microservices.
+            <p style={{ color: "#64748b", lineHeight: 1.8, fontSize: 16 }}>
+              The system was trained on over 200,000 real-world signal measurements covering phones on foot, in cars, and on high-speed trains — and responds in under 30 milliseconds.
             </p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              {[
-                { l: "React + Vite", v: "Frontend" }, { l: "FastAPI + XGBoost", v: "ML Engine" },
-                { l: "NestJS Microservices", v: "Backend" }, { l: "Docker + PostgreSQL", v: "Infrastructure" },
-              ].map(t => (
-                <div key={t.v} style={{ padding: "14px 18px", borderRadius: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                  <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>{t.v}</div>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>{t.l}</div>
-                </div>
-              ))}
-            </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             {[
-              { n: "199,990", l: "Training Samples", c: "#22d3ee" },
-              { n: "0.979", l: "DSO4 ROC AUC", c: "#a855f7" },
-              { n: "0.826", l: "Matthews MCC", c: "#22c55e" },
-              { n: "4", l: "Network Scenarios", c: "#f59e0b" },
+              { n: "200,000+", l: "Signal Measurements", c: "#22d3ee" },
+              { n: "&lt;30ms", l: "Response Time", c: "#a855f7" },
+              { n: "98%", l: "Prediction Accuracy", c: "#22c55e" },
+              { n: "4", l: "Real-World Scenarios", c: "#f59e0b" },
             ].map(s => (
               <div key={s.l} style={{
                 padding: "28px 24px", borderRadius: 16, textAlign: "center",
                 background: `${s.c}08`, border: `1px solid ${s.c}20`,
               }}>
-                <div style={{ fontSize: 32, fontWeight: 900, color: s.c, marginBottom: 8 }}>{s.n}</div>
+                <div style={{ fontSize: 32, fontWeight: 900, color: s.c, marginBottom: 8 }} dangerouslySetInnerHTML={{ __html: s.n }} />
                 <div style={{ fontSize: 12, color: "#475569", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>{s.l}</div>
               </div>
             ))}
@@ -290,11 +248,11 @@ export function LandingPage() {
         <div style={{ maxWidth: 600, margin: "0 auto", textAlign: "center" }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#22d3ee", letterSpacing: 3, textTransform: "uppercase", marginBottom: 16 }}>Contact</div>
           <h2 style={{ fontSize: 42, fontWeight: 900, letterSpacing: -1.5, marginBottom: 16 }}>Get In Touch</h2>
-          <p style={{ color: "#64748b", fontSize: 17, marginBottom: 48, lineHeight: 1.7 }}>Have questions about the platform or interested in collaboration? We'd love to hear from you.</p>
+          <p style={{ color: "#64748b", fontSize: 17, marginBottom: 48, lineHeight: 1.7 }}>Have questions about the platform or want to collaborate? We'd love to hear from you.</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {[
               { l: "Email", v: "cellpilot@gmail.com", icon: "✉️" },
-              { l: "Project", v: "5G AI Handover Platform — MLOps Research", icon: "🎓" },
+              { l: "Project", v: "5G AI Handover Platform — Research", icon: "🎓" },
               { l: "GitHub", v: "github.com/bellaaghaaziz/5G_Dashboard", icon: "💻" },
             ].map(c => (
               <div key={c.l} style={{
@@ -324,7 +282,7 @@ export function LandingPage() {
           padding: "9px 22px", borderRadius: 8, border: "1px solid rgba(34,211,238,0.3)",
           background: "transparent", color: "#22d3ee", fontWeight: 700, fontSize: 13,
           cursor: "pointer", fontFamily: "inherit",
-        }}>Launch App →</button>
+        }}>Open App →</button>
       </footer>
 
       <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`}</style>

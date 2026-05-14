@@ -1,0 +1,143 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    container_name: demo-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: demo-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: demo-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform123}
+      POSTGRES_DB: ${POSTGRES_DB:-platform_users}
+    volumes:
+      - demo_pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  user-service:
+    build:
+      context: .
+      dockerfile: docker/platform/user-service.Dockerfile
+    container_name: demo-user-service
+    environment:
+      USER_SERVICE_PORT: 3001
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform123}
+      POSTGRES_DB: ${POSTGRES_DB:-platform_users}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-demo-jwt-access-secret-2024}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-demo-jwt-refresh-secret-2024}
+      JWT_ACCESS_EXPIRES: 15m
+      JWT_REFRESH_EXPIRES: 7d
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@5g.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+      ADMIN_FULL_NAME: ${ADMIN_FULL_NAME:-Platform Admin}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  inference:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: demo-inference
+    environment:
+      PYTHONPATH: /app
+    restart: unless-stopped
+
+  prediction-service:
+    build:
+      context: .
+      dockerfile: docker/platform/prediction-service.Dockerfile
+    container_name: demo-prediction-service
+    environment:
+      PREDICTION_SERVICE_PORT: 3002
+      PYTHON_INFERENCE_BASE_URL: http://inference:8000
+    restart: unless-stopped
+
+  dashboard-service:
+    build:
+      context: .
+      dockerfile: docker/platform/dashboard-service.Dockerfile
+    container_name: demo-dashboard-service
+    environment:
+      DASHBOARD_SERVICE_PORT: 3003
+      PREDICTIONS_LOG_PATH: /app/shared-logs/predictions.json
+      KAFKA_BROKER: kafka:29092
+      KAFKA_TOPIC: 5g-telemetry
+      KAFKA_GROUP_ID: dashboard-group
+      CELL_GPS_PATH: /app/logs/cell_gps.json
+      INFERENCE_URL: http://inference:8000
+      AI_ENABLED: "true"
+    volumes:
+      - ./logs:/app/shared-logs:ro
+      - ./logs:/app/logs:ro
+    restart: unless-stopped
+
+  kafka-producer:
+    build:
+      context: .
+      dockerfile: docker/platform/kafka_producer.Dockerfile
+    container_name: demo-kafka-producer
+    environment:
+      KAFKA_BROKER: kafka:29092
+      KAFKA_TOPIC: 5g-telemetry
+      DATASET_PATH: /app/DATASET/df_master_engineered.parquet
+      CELL_GPS_PATH: /app/logs/cell_gps.json
+    volumes:
+      - ./DATASET:/app/DATASET:ro
+      - ./logs:/app/logs:ro
+    depends_on:
+      - kafka
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: docker/platform/api-gateway.Dockerfile
+    container_name: demo-api-gateway
+    environment:
+      API_GATEWAY_PORT: 3000
+      USER_SERVICE_URL: http://user-service:3001
+      PREDICTION_SERVICE_URL: http://prediction-service:3002
+      DASHBOARD_SERVICE_URL: http://dashboard-service:3003
+      ML_SERVICE_URL: http://inference:8000
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-demo-jwt-access-secret-2024}
+      LLM_API_KEY: sk-ea7d2d1704574e36b3c606de752fb653
+      LLM_BASE_URL: https://tokenfactory.esprit.tn/api
+      LLM_MODEL: hosted_vllm/Llama-3.1-70B-Instruct
+    ports:
+      - "3000:3000"
+    depends_on:
+      - user-service
+      - prediction-service
+      - dashboard-service
+    restart: unless-stopped
+
+volumes:
+  demo_pg_data:

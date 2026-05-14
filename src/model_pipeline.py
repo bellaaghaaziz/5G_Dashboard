@@ -119,6 +119,11 @@ def load_artifacts(model_dir: str | Path | None = None) -> Dict[str, Any]:
         if scen_path.exists():
             artifacts[f"model_dso4_{scen}"] = joblib.load(scen_path)
 
+    # DSO2 cell profiles (504 cells × RSRP statistics)
+    cell_profiles_path = d / "model_dso2_cell_profiles.parquet"
+    if cell_profiles_path.exists():
+        artifacts["cell_profiles"] = pd.read_parquet(cell_profiles_path)
+
     # Feature lists
     fl_path = d / "model_feature_lists.json"
     if fl_path.exists():
@@ -424,10 +429,81 @@ def predict_single(inputs: dict, artifacts: dict) -> dict:
     risk = float(artifacts["model_dso1"].predict_proba(X1_s)[0][1])
     inputs["dso1_risk_score"] = risk
 
+    # ── Stage 2.5: DSO2 — handover neighbor ranking ──────────────────────
+    viable_thresh  = float(fl.get("dso2_viable_thresh", -110.0))
+    model_dso2     = artifacts.get("model_dso2")
+    cell_profiles  = artifacts.get("cell_profiles")
+    best_nbr = float(inputs.get("best_neighbor_rsrp", -140.0))
+    mean_nbr = float(inputs.get("mean_neighbor_rsrp", -140.0))
+    num_nbr  = float(inputs.get("num_neighbors", 0.0))
+
+    if best_nbr > -139.0:
+        # Real neighbor measurements — derive DSO2 outputs and estimate RSRQ/SINR
+        rsrp_gap = best_nbr - float(inputs.get("rsrp", -95.0))
+
+        # Estimate neighbor RSRQ and SINR from serving-cell quality + RSRP gap.
+        # If the neighbor is stronger, interference load is likely lower → quality improves.
+        rsrq_now = float(inputs.get("rsrq", -12.0))
+        sinr_now = float(inputs.get("sinr",   5.0))
+        inputs["rsrq_neighboring"] = max(-20.0, min(0.0,  rsrq_now + rsrp_gap * 0.40))
+        inputs["sinr_neighboring"] = max( -5.0, min(25.0, sinr_now + rsrp_gap * 0.30))
+
+        dso2_target_rsrp = best_nbr
+        # Apply congestion penalty: a historically congested area erodes effective quality
+        congestion_rate = float(inputs.get("cell_hist_congestion_rate", 0.0))
+        dso2_target_rsrp -= congestion_rate * 4.0
+
+        if best_nbr >= viable_thresh:
+            gap = abs(best_nbr - mean_nbr) if mean_nbr > -139.0 else 10.0
+            above_ratio = max(0.1, (best_nbr - viable_thresh) / max(gap, 1.0))
+            dso2_num_candidates = max(1.0, round(num_nbr * min(above_ratio, 1.0)))
+        else:
+            dso2_num_candidates = 0.0
+    elif model_dso2 is not None and cell_profiles is not None and not cell_profiles.empty:
+        # No neighbor data — run XGBRegressor ranker against historical cell profiles
+        rsrp_now   = float(inputs.get("rsrp", -95.0))
+        candidates = cell_profiles[
+            (cell_profiles["cell_profile_mean_rsrp"] >= rsrp_now - 25) &
+            (cell_profiles["cell_profile_mean_rsrp"] <= rsrp_now + 15)
+        ].nlargest(20, "cell_profile_mean_rsrp")
+        if candidates.empty:
+            candidates = cell_profiles.nlargest(10, "cell_profile_mean_rsrp")
+
+        dso2_feats   = fl.get("dso2_features", [])
+        serving_ctx  = {f: float(inputs.get(f, 0.0)) for f in fl.get("dso2_serving_features", [])}
+        rows_list    = []
+        for _, cand in candidates.iterrows():
+            r = dict(serving_ctx)
+            r.update({
+                "nbr_cellid_enc":         float(cand["nbr_cellid"]) / 500.0,
+                "cell_profile_mean_rsrp": float(cand["cell_profile_mean_rsrp"]),
+                "cell_profile_std_rsrp":  float(cand["cell_profile_std_rsrp"]),
+                "cell_profile_p10_rsrp":  float(cand["cell_profile_p10_rsrp"]),
+                "cell_profile_p90_rsrp":  float(cand["cell_profile_p90_rsrp"]),
+                "rsrq_neighboring":       -10.0,
+                "sinr_neighboring":        5.0,
+            })
+            rows_list.append(r)
+
+        X2 = pd.DataFrame(rows_list)
+        for f in dso2_feats:
+            if f not in X2.columns:
+                X2[f] = 0.0
+        preds  = model_dso2.predict(X2[dso2_feats].fillna(0.0))
+        viable = preds[preds > viable_thresh]
+        dso2_target_rsrp    = float(viable.max()) if len(viable) > 0 else float(preds.max())
+        dso2_num_candidates = float(len(viable))
+    else:
+        dso2_target_rsrp    = -140.0
+        dso2_num_candidates = 0.0
+
+    inputs["dso2_target_rsrp"]    = dso2_target_rsrp
+    inputs["dso2_num_candidates"] = dso2_num_candidates
+
     # ── Stage 3: DSO4 Stage 1 gate ───────────────────────────────────────
     gate_thresh = artifacts.get("stage1_gate_threshold", 0.3)
-    gate_model = artifacts.get("model_dso4_stage1")
-    stage1_decision = None
+    gate_model  = artifacts.get("model_dso4_stage1")
+    ho_thresh   = artifacts.get("threshold_dso4", 0.5)
 
     if gate_model is not None:
         s1_feats = fl.get("dso4_stage1_features", fl["dso4_features"])
@@ -437,29 +513,39 @@ def predict_single(inputs: dict, artifacts: dict) -> dict:
         except Exception:
             s1_prob = 0.5
         if s1_prob < gate_thresh:
-            stage1_decision = "STAY"
+            latency = round((time.perf_counter() - t0) * 1000, 2)
+            return {
+                "dso1_risk_score":      round(risk, 4),
+                "dso3_cluster":         cluster,
+                "dso3_label":           CLUSTER_LABELS.get(cluster, f"Cluster {cluster}"),
+                "dso2_target_rsrp":     round(dso2_target_rsrp, 4),
+                "dso2_num_candidates":  int(dso2_num_candidates),
+                "dso4_probability":     round(s1_prob, 4),
+                "dso4_threshold":       round(ho_thresh, 4),
+                "handover_recommended": False,
+                "decision_source":      "stage1_gate_stay",
+                "latency_ms":           latency,
+            }
 
     # ── Stage 4: DSO4 calibrated controller ──────────────────────────────
     dso4_feats = fl["dso4_features"]
     X4 = pd.DataFrame([{f: inputs.get(f, 0.0) for f in dso4_feats}])
 
     cal_model = artifacts["model_dso4_calibrated"]
-    ho_prob = float(cal_model.predict_proba(X4)[0][1])
-    ho_thresh = artifacts.get("threshold_dso4", 0.5)
-
-    handover = ho_prob >= ho_thresh
-    decision_source = "calibrated_controller"
-
+    ho_prob   = float(cal_model.predict_proba(X4)[0][1])
+    handover  = ho_prob >= ho_thresh
 
     latency = round((time.perf_counter() - t0) * 1000, 2)
 
     return {
-        "dso1_risk_score": round(risk, 4),
-        "dso3_cluster": cluster,
-        "dso3_label": CLUSTER_LABELS.get(cluster, f"Cluster {cluster}"),
-        "dso4_probability": round(ho_prob, 4),
-        "dso4_threshold": round(ho_thresh, 4),
+        "dso1_risk_score":      round(risk, 4),
+        "dso3_cluster":         cluster,
+        "dso3_label":           CLUSTER_LABELS.get(cluster, f"Cluster {cluster}"),
+        "dso2_target_rsrp":     round(dso2_target_rsrp, 4),
+        "dso2_num_candidates":  int(dso2_num_candidates),
+        "dso4_probability":     round(ho_prob, 4),
+        "dso4_threshold":       round(ho_thresh, 4),
         "handover_recommended": handover,
-        "decision_source": decision_source,
-        "latency_ms": latency,
+        "decision_source":      "calibrated_controller",
+        "latency_ms":           latency,
     }

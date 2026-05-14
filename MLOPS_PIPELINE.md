@@ -217,6 +217,11 @@ It shows `PredictRequest` with every parameter documented: name, type, descripti
 
 **What to do:**
 
+
+ cd C:\Users\azizb\5G_Dashboard
+>> $env:MLFLOW_TRACKING_URI = "http://localhost:5000"
+>> $env:PYTHONPATH = "."
+>> python -m mlops.pipeline_runner --data-path DATASET/df_master_engineered.parquet --model-dir . --min-dso4-auc 0.50 --min-dso4-mcc 0.10 --with-mlflow
 1. Open: `http://localhost:5000`
 
 2. Click on the experiment **"5G-Handover-AI"** (or "5G_Handover_Prediction")

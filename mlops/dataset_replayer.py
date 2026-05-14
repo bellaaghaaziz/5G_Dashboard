@@ -48,6 +48,11 @@ TRAIL_MAX      = 60         # path points kept per device
 HISTORY_MAX    = 2000       # HO events kept in history file
 MAX_ROWS_TICK  = 200        # safety cap: max rows consumed per device per tick
 
+# A real LTE/5G handover completes in <1s (X2/Xn) — anything with a gap of
+# more than HANDOVER_MAX_GAP_S between samples is treated as a reconnection
+# (idle-mode cell reselection or signal loss + new attach), not a true HO.
+HANDOVER_MAX_GAP_S = float(os.getenv("HANDOVER_MAX_GAP_S", "10.0"))
+
 # ── Device metadata ───────────────────────────────────────────────────────────
 COLORS = {
     "r0s_SM-S901B":      "#22d3ee",
@@ -139,12 +144,13 @@ def write_map(trails: dict, cursors: dict, device_dfs: dict) -> None:
             "name":     NAMES.get(uid, uid),
             "path":     trail,
             "stats": {
-                "handover_count":   sum(1 for p in trail if p["is_handover"]),
-                "ai_handovers":     0,
-                "avg_rsrp":         avg_rsrp,
-                "current_cell":     last["cell_id"],
-                "current_rsrp":     last["rsrp"],
-                "current_velocity": last["velocity"],
+                "handover_count":     sum(1 for p in trail if p.get("is_handover")),
+                "reconnection_count": sum(1 for p in trail if p.get("is_reconnection")),
+                "ai_handovers":       0,
+                "avg_rsrp":           avg_rsrp,
+                "current_cell":       last["cell_id"],
+                "current_rsrp":       last["rsrp"],
+                "current_velocity":   last["velocity"],
             },
             "progress": {
                 "cursor": cursor,
@@ -208,6 +214,8 @@ def _build_features(uid: str, row, virt_now: float,
         "rsrq":                _safe(row, "rsrq", -12.0),
         "sinr":                sinr,
         "cqi":                 _safe(row, "cqi",  9.0),
+        "tx_power":            _safe(row, "tx_power", 23.0),
+        "ta":                  _safe(row, "ta", 0.0),
         "velocity":            _safe(row, "velocity", 0.0),
         "rsrp_delta_3":        round(rsrp_d3, 2),
         "sinr_delta_3":        round(sinr_d3, 2),
@@ -219,6 +227,12 @@ def _build_features(uid: str, row, virt_now: float,
         "serving_cell_age":    round(serv_age, 1),
         "hour_of_day":         float(ts_dt.hour),
         "day_of_week":         float(ts_dt.dayofweek),
+        "cell_load_drop_flag": _safe(row, "cell_load_drop_flag", 0.0),
+        # Neighbor features — feed DSO2 with real measurements from the dataset
+        "num_neighbors":       _safe(row, "num_neighbors", 0.0),
+        "best_neighbor_rsrp":  _safe(row, "best_neighbor_rsrp", -140.0),
+        "mean_neighbor_rsrp":  _safe(row, "mean_neighbor_rsrp", -140.0),
+        "neighbor_diversity":  _safe(row, "neighbor_diversity", 0.0),
         "physical_cellid":     float(int(row["physical_cellid"])),
         "master_id":           uid,
         "scenario":            SCENARIOS.get(uid, "mobile"),
@@ -243,6 +257,8 @@ def _fire_ai(uid: str, features: dict, ai_buf: dict) -> None:
             "handover_recommended": bool(result.get("handover_recommended", False)),
             "dso4_probability":     float(result.get("dso4_probability",  0.0)),
             "dso1_risk_score":      float(result.get("dso1_risk_score",   0.0)),
+            "dso2_target_rsrp":     float(result.get("dso2_target_rsrp", -140.0)),
+            "dso2_num_candidates":  int(result.get("dso2_num_candidates", 0)),
             "dso3_cluster":         int(result.get("dso3_cluster", -1)),
             "dso3_label":           str(result.get("dso3_label",   "")),
             "decision_source":      str(result.get("decision_source", "")),
@@ -266,6 +282,7 @@ def run() -> None:
     cursors:    dict = {uid: 0    for uid in uids}
     trails:     dict = {uid: []   for uid in uids}
     prev_cells: dict = {uid: None for uid in uids}
+    prev_ts:    dict = {uid: None for uid in uids}  # last consumed sample's ts_num
 
     # Per-device rolling buffers for AI feature computation
     rsrp_hist     = {uid: deque(maxlen=30) for uid in uids}
@@ -294,6 +311,7 @@ def run() -> None:
                 cursors[uid]  = 0
                 trails[uid]   = trails[uid][-1:] if trails[uid] else []
                 prev_cells[uid] = None
+                prev_ts[uid]    = None
                 # Clear AI state on loop so old-cell entries don't bleed into new loop
                 rsrp_hist[uid].clear()
                 sinr_hist[uid].clear()
@@ -314,26 +332,37 @@ def run() -> None:
                 cell     = int(row["physical_cellid"])
                 rsrp     = float(row["rsrp"])     if not pd.isna(row["rsrp"])     else -140.0
                 vel      = float(row["velocity"]) if not pd.isna(row["velocity"]) else 0.0
-                is_ho_flag = bool(row["is_ho"] == 1)
+                ts_now   = float(row["ts_num"])
 
-                real_ho = (
-                    is_ho_flag
-                    and prev_cells[uid] is not None
+                # Time gap since the previous consumed sample for this device.
+                # None on the very first row of a (re)play loop.
+                gap_s = (ts_now - prev_ts[uid]) if prev_ts[uid] is not None else None
+
+                cell_changed = (
+                    prev_cells[uid] is not None
                     and prev_cells[uid] != cell
                 )
 
+                # Real handover: cell changed AND samples are temporally adjacent.
+                # Reconnection: cell changed but the gap is too large for an
+                # in-session handover (idle-mode cell reselection / lost link).
+                real_ho   = cell_changed and gap_s is not None and gap_s <= HANDOVER_MAX_GAP_S
+                is_reconn = cell_changed and gap_s is not None and gap_s >  HANDOVER_MAX_GAP_S
+
                 point = {
-                    "lat":            float(row["_lat"]),
-                    "lng":            float(row["_lng"]),
-                    "timestamp":      pd.Timestamp(row["ts_num"], unit="s", tz="UTC").isoformat(),
-                    "rsrp":           round(rsrp, 1),
-                    "sinr":           0.0,
-                    "velocity":       round(vel, 1),
-                    "cell_id":        cell,
-                    "is_handover":    real_ho,
-                    "is_recommended": False,
-                    "from_cell":      prev_cells[uid] if real_ho else None,
-                    "rsrp_gain":      None,
+                    "lat":             float(row["_lat"]),
+                    "lng":             float(row["_lng"]),
+                    "timestamp":       pd.Timestamp(ts_now, unit="s", tz="UTC").isoformat(),
+                    "rsrp":            round(rsrp, 1),
+                    "sinr":            0.0,
+                    "velocity":        round(vel, 1),
+                    "cell_id":         cell,
+                    "is_handover":     real_ho,
+                    "is_reconnection": is_reconn,
+                    "is_recommended":  False,
+                    "from_cell":       prev_cells[uid] if (real_ho or is_reconn) else None,
+                    "gap_s":           round(gap_s, 1) if gap_s is not None else None,
+                    "rsrp_gain":       None,
                 }
 
                 if real_ho and trails[uid]:
@@ -387,6 +416,7 @@ def run() -> None:
                         "name":         NAMES.get(uid, uid),
                         "color":        COLORS.get(uid, "#94a3b8"),
                         "timestamp":    point["timestamp"],
+                        "event_type":   "handover",
                         "from_cell":    prev_cells[uid],
                         "to_cell":      cell,
                         "rsrp_before":  round(prev_rsrp, 1),
@@ -395,13 +425,39 @@ def run() -> None:
                         "velocity":     round(vel, 1),
                         "reason":       reason,
                         "scenario":     SCENARIOS.get(uid, "mobile"),
+                        "gap_s":        round(gap_s, 1) if gap_s is not None else None,
                         "lat":          point["lat"],
                         "lng":          point["lng"],
                         "ai_prediction": ai_prediction,
                     })
 
-                # Update cell entry tracking when cell changes
-                if prev_cells[uid] != cell:
+                elif is_reconn and trails[uid]:
+                    # Reconnection — long gap, treat as session reset, NOT a HO.
+                    # Logged so the operator can see the device went idle and
+                    # re-attached on a different cell, but excluded from HO KPIs.
+                    prev_rsrp = trails[uid][-1]["rsrp"]
+                    new_events.append({
+                        "ue_id":        uid,
+                        "name":         NAMES.get(uid, uid),
+                        "color":        COLORS.get(uid, "#94a3b8"),
+                        "timestamp":    point["timestamp"],
+                        "event_type":   "reconnection",
+                        "from_cell":    prev_cells[uid],
+                        "to_cell":      cell,
+                        "rsrp_before":  round(prev_rsrp, 1),
+                        "rsrp_after":   round(rsrp, 1),
+                        "rsrp_gain":    round(rsrp - prev_rsrp, 1),
+                        "velocity":     round(vel, 1),
+                        "reason":       "reconnection",
+                        "scenario":     SCENARIOS.get(uid, "mobile"),
+                        "gap_s":        round(gap_s, 1) if gap_s is not None else None,
+                        "lat":          point["lat"],
+                        "lng":          point["lng"],
+                        "ai_prediction": None,  # AI didn't predict this — there was no continuous session
+                    })
+
+                # Update cell entry tracking when cell changes (for either case)
+                if cell_changed:
                     cell_entry_vt[uid] = virt_now[uid]
 
                 # Update rolling buffers (after HO detection, before prev_cells update)
@@ -412,6 +468,7 @@ def run() -> None:
                     ho_virt_ts[uid].append(virt_now[uid])
 
                 prev_cells[uid] = cell
+                prev_ts[uid]    = ts_now
                 trails[uid].append(point)
                 if len(trails[uid]) > TRAIL_MAX:
                     trails[uid] = trails[uid][-TRAIL_MAX:]

@@ -584,8 +584,17 @@ export class DashboardService {
       try { return JSON.parse(readFileSync(this.datasetMapPath, "utf-8")); } catch { return []; }
     })();
 
-    const hoEvents = this.readHoEvents();
+    const allEvents = this.readHoEvents();
+    // True handovers only — reconnections (long gap re-attaches) are tracked
+    // separately and excluded from KPIs that describe in-session mobility.
+    const hoEvents = allEvents.filter(
+      (e: any) => (e.event_type ?? "handover") === "handover",
+    );
+    const reconnEvents = allEvents.filter(
+      (e: any) => e.event_type === "reconnection",
+    );
     const total = hoEvents.length;
+    const reconnections = reconnEvents.length;
     const mobility = hoEvents.filter((e: any) => e.reason === "mobility").length;
     const congestion = hoEvents.filter((e: any) => e.reason === "congestion").length;
     const gains = hoEvents.map((e: any) => Number(e.rsrp_gain)).filter((g: number) => isFinite(g));
@@ -621,6 +630,7 @@ export class DashboardService {
     return {
       kpis: {
         totalHandovers: total,
+        reconnections,
         mobilityHandovers: mobility,
         congestionHandovers: congestion,
         avgRsrpGain: avgGain,
@@ -649,7 +659,11 @@ export class DashboardService {
       try { return JSON.parse(readFileSync(this.datasetMapPath, "utf-8")); } catch { return []; }
     })();
 
-    const events = hoEvents.slice(-2000);
+    // Tower stats describe in-session mobility — count handovers only,
+    // not idle-mode reconnections.
+    const events = hoEvents
+      .filter((e: any) => (e.event_type ?? "handover") === "handover")
+      .slice(-2000);
 
     // Cells currently connected to a device
     const activeCells = new Set<number>();

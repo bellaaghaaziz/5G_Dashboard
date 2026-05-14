@@ -4,31 +4,8 @@ import PsychologyRoundedIcon from "@mui/icons-material/PsychologyRounded";
 import SignalCellularAltRoundedIcon from "@mui/icons-material/SignalCellularAltRounded";
 import TrafficRoundedIcon from "@mui/icons-material/TrafficRounded";
 import { Box, Card, CardContent, Stack, Typography } from "@mui/material";
-import { useCallback, useEffect, useRef, useState } from "react";
 import { TunisiaMap } from "../components/TunisiaMap";
-import { api } from "../api/client";
-
-type DatasetOverview = {
-  kpis: {
-    totalHandovers: number;
-    mobilityHandovers: number;
-    congestionHandovers: number;
-    avgRsrpGain: number;
-    activeDevices: number;
-    replayProgress: number;
-    aiProactiveCount: number;
-    aiProactiveRate: number;
-    aiAvgHeadroomDb: number;
-  };
-  devices: Array<{
-    name: string;
-    color: string;
-    scenario: string;
-    currentRsrp: number;
-    currentVelocity: number;
-    progress: { cursor: number; total: number; pct: number } | null;
-  }>;
-};
+import { useMapWebSocket } from "../api/useMapWebSocket";
 
 function KpiCard({ label, sublabel, value, unit, icon, color }: {
   label: string; sublabel: string; value: string | number;
@@ -58,46 +35,32 @@ function KpiCard({ label, sublabel, value, unit, icon, color }: {
 }
 
 export function OperatorPage() {
-  const [overview, setOverview] = useState<DatasetOverview | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
-
-  const fetchOverview = useCallback(async () => {
-    try {
-      const { data } = await api.get("/operator/dataset-overview");
-      setOverview(data);
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    fetchOverview();
-    timerRef.current = setInterval(fetchOverview, 3000);
-    return () => clearInterval(timerRef.current);
-  }, [fetchOverview]);
+  const { overview, mapState, towers, connected } = useMapWebSocket();
 
   const kpi = overview?.kpis;
   const gainPositive = (kpi?.avgRsrpGain ?? 0) >= 0;
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, height: "calc(100vh - 112px)" }}>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, height: { xs: "auto", md: "calc(100vh - 112px)" } }}>
 
       {/* Header */}
-      <Stack direction="row" justifyContent="space-between" alignItems="center">
+      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={1}>
         <Box>
-          <Typography variant="h5" sx={{ fontWeight: 900, letterSpacing: -0.5, color: "#f1f5f9" }}>
+          <Typography variant="h5" sx={{ fontWeight: 900, letterSpacing: -0.5, color: "#f1f5f9", fontSize: { xs: 18, md: 24 } }}>
             Network Operations Center
           </Typography>
           <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.2 }}>
-            Real 5G measurements from the Ruhr region of Germany — replaying at 30× speed
+            Real 5G measurements from the Ruhr region of Germany — streaming live via Kafka
           </Typography>
         </Box>
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: 2, px: 1.5, py: 0.75 }}>
-          <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: "#22c55e", boxShadow: "0 0 6px #22c55e" }} />
-          <Typography variant="caption" sx={{ fontWeight: 700, color: "#22c55e" }}>LIVE</Typography>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ background: connected ? "rgba(34,197,94,0.1)" : "rgba(245,158,11,0.1)", border: connected ? "1px solid rgba(34,197,94,0.25)" : "1px solid rgba(245,158,11,0.25)", borderRadius: 2, px: 1.5, py: 0.75 }}>
+          <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: connected ? "#22c55e" : "#f59e0b", boxShadow: connected ? "0 0 6px #22c55e" : "0 0 6px #f59e0b" }} />
+          <Typography variant="caption" sx={{ fontWeight: 700, color: connected ? "#22c55e" : "#f59e0b" }}>{connected ? "LIVE" : "CONNECTING…"}</Typography>
         </Stack>
       </Stack>
 
       {/* KPI Cards — real data from dataset replay */}
-      <Stack direction="row" spacing={1.5}>
+      <Stack direction="row" spacing={1.5} sx={{ flexWrap: "wrap", "& > *": { minWidth: { xs: "calc(50% - 6px)", sm: 0 }, flex: 1 } }}>
         <KpiCard
           label="Tower Switches"
           sublabel="total handovers logged so far"
@@ -139,7 +102,7 @@ export function OperatorPage() {
 
       {/* Map — fills all remaining space */}
       <Box sx={{ flex: 1, minHeight: 0 }}>
-        <TunisiaMap />
+        <TunisiaMap trips={mapState} towers={towers} connected={connected} />
       </Box>
     </Box>
   );

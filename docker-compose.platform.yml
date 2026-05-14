@@ -76,6 +76,12 @@
     environment:
       DASHBOARD_SERVICE_PORT: 3003
       PREDICTIONS_LOG_PATH: /app/shared-logs/predictions.json
+      KAFKA_BROKER: kafka:29092
+      KAFKA_TOPIC: 5g-telemetry
+      KAFKA_GROUP_ID: dashboard-group
+      CELL_GPS_PATH: /app/shared-logs/cell_gps.json
+      INFERENCE_URL: http://host.docker.internal:8000
+      AI_ENABLED: "true"
     volumes:
       - ./logs:/app/shared-logs:ro
     ports:
@@ -121,6 +127,7 @@
       retries: 5
 
   replayer:
+    profiles: ["legacy"]   # disabled — use kafka-producer instead
     build:
       context: .
       dockerfile: docker/platform/replayer.Dockerfile
@@ -143,6 +150,7 @@
     container_name: platform-web
     environment:
       VITE_API_BASE_URL: http://localhost:3000
+      VITE_WS_URL: http://localhost:3003
     ports:
       - "5173:5173"
     depends_on:
@@ -183,11 +191,12 @@
     container_name: platform-mlflow
     working_dir: /mlflow
     command: >
-      sh -c "pip install mlflow -q && mlflow ui --host 0.0.0.0 --port 5000 --backend-store-uri file:///mlruns"
+      sh -c "mkdir -p /mlruns/.trash && pip install mlflow -q && mlflow server --backend-store-uri sqlite:////mlflow.db --default-artifact-root file:///mlruns --host 0.0.0.0 --port 5000"
     ports:
       - "5000:5000"
     volumes:
       - ./mlruns:/mlruns
+      - ./mlflow.db:/mlflow.db
     restart: unless-stopped
 
   # ── FastAPI Inference Server ──────────────────────────────────────────────
@@ -207,6 +216,12 @@
       - ./api.py:/app/api.py:ro
       - ./logs:/app/logs
       - ./mlruns:/app/mlruns
+      - ./model_manifest.json:/app/model_manifest.json:ro
+      - ./metrics.json:/app/metrics.json:ro
+      - ./mlops:/app/mlops:ro
+      - ./src:/app/src:ro
+      - ./DATASET:/app/DATASET:ro
+      - ./model_feature_lists.json:/app/model_feature_lists.json:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 20s
@@ -273,6 +288,11 @@
     environment:
       - KAFKA_BROKER=kafka:29092
       - KAFKA_TOPIC=5g-telemetry
+      - DATASET_PATH=/app/DATASET/df_master_engineered.parquet
+      - CELL_GPS_PATH=/app/shared-logs/cell_gps.json
+    volumes:
+      - ./DATASET:/app/DATASET:ro
+      - ./logs:/app/shared-logs:ro
     restart: unless-stopped
 
 volumes:

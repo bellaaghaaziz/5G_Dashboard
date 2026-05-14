@@ -1,6 +1,6 @@
 {
-  "created_at_utc": "2026-05-06T14:47:18Z",
-  "git_commit": "7acaf99",
+  "created_at_utc": "2026-05-07T13:07:03Z",
+  "git_commit": "1e8f2bc",
   "python_version": "3.14.0",
   "cwd": "C:\\Users\\azizb\\5G_Dashboard",
   "data_path": "DATASET\\df_master_engineered.parquet",

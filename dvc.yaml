@@ -1,10 +1,21 @@
 stages:
+  ingest:
+    cmd: echo "New Kafka batch written to DATASET/raw/live_data.csv"
+    deps:
+    - DATASET/raw/live_data.csv
+    outs:
+    - DATASET/raw/live_data.csv:
+        cache: false
+        push: false
+
   prep:
     cmd: python src/data_prep.py
     deps:
+    - DATASET/raw/live_data.csv
     - data/raw/
     outs:
     - data/processed/
+
   train:
     cmd: python train_mlflow.py
     deps:

@@ -5,5 +5,6 @@ COPY services/dashboard-service/package.json services/dashboard-service/package.
 RUN npm install
 COPY services/dashboard-service services/dashboard-service
 RUN npm run build -w services/dashboard-service
+COPY logs/cell_gps.json /app/logs/cell_gps.json
 EXPOSE 3003
 CMD ["npm", "run", "start", "-w", "services/dashboard-service"]

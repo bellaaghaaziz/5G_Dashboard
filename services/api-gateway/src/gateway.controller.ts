@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Inject, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Headers, Inject, Param, Post, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
 import { Roles } from "./auth/roles.decorator";
 import { RolesGuard } from "./auth/roles.guard";
@@ -58,6 +58,13 @@ export class GatewayController {
     return this.gatewayService.proxyToUser("/users", "POST", body, authHeader);
   }
 
+  @Delete("admin/users/:id")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("admin")
+  deleteUser(@Headers("authorization") authHeader: string, @Param("id") id: string) {
+    return this.gatewayService.proxyToUser(`/users/${id}`, "DELETE", undefined, authHeader);
+  }
+
   // ── Prediction ──
 
   @Post("predict")
@@ -95,6 +102,48 @@ export class GatewayController {
   @Roles("ml_engineer", "admin")
   mlflowSummary() {
     return this.gatewayService.proxyToML("/mlops/mlflow-summary", "GET");
+  }
+
+  @Get("mlops/shap/:dso")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  mlopsShap(@Param("dso") dso: string) {
+    return this.gatewayService.proxyToML(`/shap/${dso}`, "GET");
+  }
+
+  @Get("mlops/dvc/dag")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  dvcDag() {
+    return this.gatewayService.proxyToML("/dvc/dag", "GET");
+  }
+
+  @Get("mlops/dvc/status")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  dvcStatus() {
+    return this.gatewayService.proxyToML("/dvc/status", "GET");
+  }
+
+  @Post("mlops/dvc/repro")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  dvcRepro(@Body() body: unknown) {
+    return this.gatewayService.proxyToMLLong("/dvc/repro", "POST", body);
+  }
+
+  @Post("mlops/auto-retrain")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  autoRetrain() {
+    return this.gatewayService.proxyToMLLong("/mlops/auto-retrain", "POST");
+  }
+
+  @Get("mlops/champion-metrics")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ml_engineer", "admin")
+  championMetrics() {
+    return this.gatewayService.proxyToML("/mlops/champion-metrics", "GET");
   }
 
   // ── Prometheus / Grafana / MLflow UI proxies ──

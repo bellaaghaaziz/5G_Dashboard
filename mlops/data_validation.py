@@ -20,16 +20,25 @@ def validate_dataset(
     parquet_path: str | Path,
     required_columns: Iterable[str],
     *,
-    max_null_rate: float = 0.30,
+    max_null_rate: float = 0.60,
     min_rows: int = 1000,
 ) -> ValidationResult:
-    """
+    “””
     Lightweight “MLOps-professor style” data validation:
     - file exists
     - required columns exist
     - dataset has enough rows
-    - required columns aren’t mostly-null
-    """
+    - CORE signal columns aren’t mostly-null (neighbor/load features allowed higher null rate)
+
+    Null-rate tolerance:
+      Core radio features (rsrp, rsrq, sinr, cqi, velocity, tx_power): max 10%
+      All other features: max_null_rate (default 60%), since neighbor/load columns
+      are legitimately null for devices without neighboring cell data.
+    “””
+    CORE_FEATURES = {“rsrp”, “rsrq”, “sinr”, “cqi”, “velocity”, “tx_power”,
+                     “target_is_degrading”, “target_ho_flag”}
+    CORE_MAX_NULL = 0.10
+
     p = Path(parquet_path)
     if not p.exists():
         return ValidationResult(
@@ -52,8 +61,11 @@ def validate_dataset(
         ok = False
     if len(df) < min_rows:
         ok = False
-    if any(r > max_null_rate for r in null_rates.values()):
-        ok = False
+    for col, rate in null_rates.items():
+        threshold = CORE_MAX_NULL if col in CORE_FEATURES else max_null_rate
+        if rate > threshold:
+            ok = False
+            break
 
     return ValidationResult(
         ok=ok,

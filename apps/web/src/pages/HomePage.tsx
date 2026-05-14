@@ -3,7 +3,6 @@ import CellTowerRoundedIcon from "@mui/icons-material/CellTowerRounded";
 import ScienceRoundedIcon from "@mui/icons-material/ScienceRounded";
 import { Box, Card, CardActionArea, CardContent, Grid, Stack, Typography } from "@mui/material";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/auth";
 
 const GLASS = {
   background: "rgba(15, 23, 42, 0.65)",
@@ -14,24 +13,24 @@ const GLASS = {
 
 const sections = [
   {
-    title: "Network Operations",
-    desc: "Monitor live 5G signal risk, view handover recommendations on the topology map, and take action in real-time.",
+    title: "Live Map",
+    desc: "Watch devices move across the city in real time and see the AI keeping connections strong automatically.",
     icon: <CellTowerRoundedIcon sx={{ fontSize: 36 }} />,
     gradient: "linear-gradient(135deg, #22d3ee, #3b82f6)",
     shadow: "rgba(34,211,238,0.3)",
     path: "/app/operator",
   },
   {
-    title: "Intelligence Lab",
-    desc: "Analyze model performance metrics, review training experiments, and understand the DSO pipeline accuracy.",
+    title: "AI Results",
+    desc: "A simple view of how well the AI has been performing — accuracy, reliability, and any alerts worth knowing about.",
     icon: <ScienceRoundedIcon sx={{ fontSize: 36 }} />,
     gradient: "linear-gradient(135deg, #a855f7, #6366f1)",
     shadow: "rgba(168,85,247,0.3)",
     path: "/app/scientist",
   },
   {
-    title: "Admin Console",
-    desc: "Manage system users, assign roles (operator, scientist, admin), and control platform access.",
+    title: "Admin",
+    desc: "Add or remove users and decide what each person is allowed to see and do on the platform.",
     icon: <AdminPanelSettingsRoundedIcon sx={{ fontSize: 36 }} />,
     gradient: "linear-gradient(135deg, #f59e0b, #ef4444)",
     shadow: "rgba(245,158,11,0.3)",
@@ -40,7 +39,6 @@ const sections = [
 ];
 
 export function HomePage() {
-  const { role } = useAuth();
   const navigate = useNavigate();
 
   return (
@@ -61,11 +59,7 @@ export function HomePage() {
           5G Handover AI
         </Typography>
         <Typography variant="h6" sx={{ color: "text.secondary", fontWeight: 400, maxWidth: 600 }}>
-          Welcome back! You are logged in as{" "}
-          <Box component="span" sx={{ fontWeight: 700, color: "primary.main" }}>
-            {role?.replace("_", " ") ?? "user"}
-          </Box>
-          . Select a module below to get started.
+          Welcome back! Where would you like to go?
         </Typography>
       </Box>
 

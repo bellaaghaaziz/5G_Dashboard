@@ -72,6 +72,11 @@ export class GatewayService {
     return this.proxy(this.mlServiceBase, path, method, body, token);
   }
 
+  /** Long-timeout proxy for ML training/pipeline requests (up to 600s). */
+  proxyToMLLong(path: string, method: Method, body?: unknown, token?: string) {
+    return this.proxy(this.mlServiceBase, path, method, body, token, 600000);
+  }
+
   proxyToPrometheus(path: string, method: Method, body?: unknown, token?: string) {
     // Prometheus often returns plain text; increase timeout for complex queries
     return this.proxy(this.prometheusBase, path, method, body, token, 20000);

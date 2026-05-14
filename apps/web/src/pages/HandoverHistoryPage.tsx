@@ -1,8 +1,9 @@
 import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import PsychologyRoundedIcon from "@mui/icons-material/PsychologyRounded";
 import { Box, Card, Chip, CircularProgress, Stack, Tooltip, Typography } from "@mui/material";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
+import { useMapWebSocket } from "../api/useMapWebSocket";
 
 type AIPrediction = {
   recommended: boolean;
@@ -20,18 +21,27 @@ type HOEvent = {
   name: string;
   color: string;
   timestamp: string;
+  event_type?: "handover" | "reconnection";
   from_cell: number;
   to_cell: number;
   rsrp_before: number;
   rsrp_after: number;
   rsrp_gain: number;
   velocity: number;
-  reason: "mobility" | "congestion";
+  gap_s?: number | null;
+  reason: "mobility" | "congestion" | "reconnection";
   scenario: string;
   lat: number;
   lng: number;
   ai_prediction: AIPrediction | null;
 };
+
+function fmtGap(g: number | null | undefined): string {
+  if (g == null || !isFinite(g)) return "";
+  if (g < 60) return `${g.toFixed(1)}s`;
+  if (g < 3600) return `${(g / 60).toFixed(1)} min`;
+  return `${(g / 3600).toFixed(1)} h`;
+}
 
 const SCENARIO_ICON: Record<string, string> = {
   hbahn: "🚋",
@@ -140,6 +150,9 @@ export function HandoverHistoryPage() {
   const [filter, setFilter] = useState<string>("all");
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
+  // Real-time AI-annotated events from WebSocket
+  const { hoHistory } = useMapWebSocket();
+
   const fetchEvents = useCallback(async () => {
     try {
       const { data } = await api.get<HOEvent[]>("/operator/dataset-handovers");
@@ -153,33 +166,53 @@ export function HandoverHistoryPage() {
 
   useEffect(() => {
     fetchEvents();
-    pollRef.current = setInterval(fetchEvents, 2000);
+    pollRef.current = setInterval(fetchEvents, 5000);
     return () => clearInterval(pollRef.current);
   }, [fetchEvents]);
 
+  // Merge WS real-time events (with AI data) + REST historical events (deduped by ue_id+timestamp)
+  const allEvents = useMemo<HOEvent[]>(() => {
+    const seen = new Set<string>();
+    const result: HOEvent[] = [];
+    for (const e of hoHistory) {
+      const key = `${e.ue_id}-${e.timestamp}`;
+      if (!seen.has(key)) { seen.add(key); result.push(e as HOEvent); }
+    }
+    for (const e of events) {
+      const key = `${e.ue_id}-${e.timestamp}`;
+      if (!seen.has(key)) { seen.add(key); result.push(e); }
+    }
+    return result;
+  }, [hoHistory, events]);
+
+  // Split: real handovers vs reconnections (long-gap re-attaches).
+  // KPIs and AI metrics describe handovers only — reconnections are shown
+  // for situational awareness but excluded from mobility/congestion stats.
+  const isRecon = (e: HOEvent) => e.event_type === "reconnection";
+  const handoverEvents = allEvents.filter((e) => !isRecon(e));
+  const reconnectEvents = allEvents.filter(isRecon);
+
   // Unique devices from events
   const devices = Array.from(
-    new Map(events.map((e) => [e.ue_id, { ue_id: e.ue_id, name: e.name, color: e.color }])).values(),
+    new Map(allEvents.map((e) => [e.ue_id, { ue_id: e.ue_id, name: e.name, color: e.color }])).values(),
   );
 
-  const filtered = filter === "all" ? events : events.filter((e) => e.ue_id === filter);
+  const filtered = filter === "all" ? allEvents : allEvents.filter((e) => e.ue_id === filter);
 
-  // Stats
-  const mobilityCount   = events.filter((e) => e.reason === "mobility").length;
-  const congestionCount = events.filter((e) => e.reason === "congestion").length;
+  // Stats (handovers only)
+  const mobilityCount   = handoverEvents.filter((e) => e.reason === "mobility").length;
+  const congestionCount = handoverEvents.filter((e) => e.reason === "congestion").length;
+  const reconnectCount  = reconnectEvents.length;
   const avgGain =
-    events.length > 0
-      ? (events.reduce((s, e) => s + e.rsrp_gain, 0) / events.length).toFixed(1)
+    handoverEvents.length > 0
+      ? (handoverEvents.reduce((s, e) => s + e.rsrp_gain, 0) / handoverEvents.length).toFixed(1)
       : "0";
 
-  // AI stats
-  const aiProactive  = events.filter(
+  // AI stats — handovers only (reconnections have no in-session AI prediction)
+  const aiProactive  = handoverEvents.filter(
     (e) => e.ai_prediction?.recommended && (e.ai_prediction?.proactive_headroom_db ?? 0) > 0,
   ).length;
-  const aiAligned    = events.filter(
-    (e) => e.ai_prediction?.recommended && !((e.ai_prediction?.proactive_headroom_db ?? 0) > 0),
-  ).length;
-  const headrooms    = events
+  const headrooms    = handoverEvents
     .map((e) => e.ai_prediction?.proactive_headroom_db)
     .filter((h): h is number => typeof h === "number" && h > 0);
   const avgHeadroom  =
@@ -195,10 +228,10 @@ export function HandoverHistoryPage() {
           <HistoryRoundedIcon sx={{ fontSize: 28, color: "#94a3b8" }} />
           <Box>
             <Typography variant="h5" sx={{ fontWeight: 900, letterSpacing: -0.5, color: "#f1f5f9" }}>
-              Tower Switch Log
+              Handover & Reconnection Log
             </Typography>
             <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.3 }}>
-              Every cell handover with AI prediction analysis — traditional vs model-driven decision
+              Real handovers (gap ≤ 10s) shown alongside reconnections (long-gap re-attaches) — AI prediction analysis on the former
             </Typography>
           </Box>
         </Stack>
@@ -208,19 +241,27 @@ export function HandoverHistoryPage() {
         </Stack>
       </Stack>
 
-      {/* Summary stats — 6 cards */}
+      {/* Summary stats — 7 cards (HO + reconnections separated) */}
       <Stack direction="row" spacing={1.5}>
-        <Card sx={{ flex: 1, background: "rgba(10,20,40,0.7)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 3, p: "12px 16px" }}>
-          <Typography sx={{ fontSize: 24, fontWeight: 900, color: "#f1f5f9", lineHeight: 1 }}>{events.length}</Typography>
-          <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.5 }}>Total tower switches</Typography>
-        </Card>
+        <Tooltip title="In-session handovers — cell switches with sample gap ≤ 10s. Excludes reconnections after long idle periods." arrow>
+          <Card sx={{ flex: 1, background: "rgba(10,20,40,0.7)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 3, p: "12px 16px", cursor: "help" }}>
+            <Typography sx={{ fontSize: 24, fontWeight: 900, color: "#f1f5f9", lineHeight: 1 }}>{handoverEvents.length}</Typography>
+            <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.5 }}>True handovers</Typography>
+          </Card>
+        </Tooltip>
+        <Tooltip title="Long-gap re-attaches (gap > 10s). Device went idle / lost signal and re-connected on a different cell — NOT a real X2/Xn handover." arrow>
+          <Card sx={{ flex: 1, background: "rgba(10,20,40,0.5)", border: "1px solid rgba(148,163,184,0.15)", borderRadius: 3, p: "12px 16px", cursor: "help" }}>
+            <Typography sx={{ fontSize: 24, fontWeight: 900, color: "#94a3b8", lineHeight: 1 }}>{reconnectCount}</Typography>
+            <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.5 }}>Reconnections</Typography>
+          </Card>
+        </Tooltip>
         <Card sx={{ flex: 1, background: "rgba(10,20,40,0.7)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 3, p: "12px 16px" }}>
           <Typography sx={{ fontSize: 24, fontWeight: 900, color: "#a855f7", lineHeight: 1 }}>{mobilityCount}</Typography>
-          <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.5 }}>Due to movement</Typography>
+          <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.5 }}>HO due to movement</Typography>
         </Card>
         <Card sx={{ flex: 1, background: "rgba(10,20,40,0.7)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 3, p: "12px 16px" }}>
           <Typography sx={{ fontSize: 24, fontWeight: 900, color: "#f59e0b", lineHeight: 1 }}>{congestionCount}</Typography>
-          <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.5 }}>Due to congestion</Typography>
+          <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.5 }}>HO due to congestion</Typography>
         </Card>
         <Card sx={{ flex: 1, background: "rgba(10,20,40,0.7)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 3, p: "12px 16px" }}>
           <Typography sx={{ fontSize: 24, fontWeight: 900, color: Number(avgGain) >= 0 ? "#22c55e" : "#ef4444", lineHeight: 1 }}>
@@ -302,7 +343,7 @@ export function HandoverHistoryPage() {
             <Box
               sx={{
                 display: "grid",
-                gridTemplateColumns: "80px 160px 130px 78px 78px 70px 62px 1fr",
+                gridTemplateColumns: "80px 70px 160px 130px 70px 78px 78px 70px 62px 1fr",
                 px: 2,
                 py: 1,
                 borderBottom: "1px solid rgba(255,255,255,0.05)",
@@ -312,7 +353,7 @@ export function HandoverHistoryPage() {
                 zIndex: 1,
               }}
             >
-              {["Time", "Device", "Tower switch", "Before", "After", "Change", "Reason", "AI Intel"].map((h) => (
+              {["Time", "Type", "Device", "Tower switch", "Gap", "Before", "After", "Change", "Reason", "AI Intel"].map((h) => (
                 <Typography key={h} sx={{ fontSize: 10, fontWeight: 700, color: "#334155", textTransform: "uppercase", letterSpacing: 0.8 }}>
                   {h}
                 </Typography>
@@ -321,24 +362,40 @@ export function HandoverHistoryPage() {
 
             {filtered.map((ev, i) => {
               const icon = SCENARIO_ICON[ev.scenario] ?? "📡";
-              const reasonColor = ev.reason === "mobility" ? "#a855f7" : "#f59e0b";
+              const recon = isRecon(ev);
+              const typeColor = recon ? "#94a3b8" : "#22d3ee";
+              const reasonColor = recon ? "#94a3b8" : ev.reason === "mobility" ? "#a855f7" : "#f59e0b";
               return (
                 <Box
                   key={i}
                   sx={{
                     display: "grid",
-                    gridTemplateColumns: "80px 160px 130px 78px 78px 70px 62px 1fr",
+                    gridTemplateColumns: "80px 70px 160px 130px 70px 78px 78px 70px 62px 1fr",
                     px: 2,
                     py: "7px",
                     borderBottom: "1px solid rgba(255,255,255,0.03)",
                     alignItems: "center",
-                    "&:hover": { background: "rgba(255,255,255,0.02)" },
+                    background: recon ? "rgba(148,163,184,0.025)" : "transparent",
+                    "&:hover": { background: recon ? "rgba(148,163,184,0.05)" : "rgba(255,255,255,0.02)" },
                   }}
                 >
                   {/* Time */}
                   <Typography sx={{ fontSize: 11, color: "#475569", fontFamily: "monospace" }}>
                     {fmtTime(ev.timestamp)}
                   </Typography>
+
+                  {/* Event type */}
+                  <Box>
+                    <span
+                      style={{
+                        fontSize: 9, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase",
+                        color: typeColor, background: `${typeColor}15`, border: `1px solid ${typeColor}40`,
+                        borderRadius: 4, padding: "1px 6px",
+                      }}
+                    >
+                      {recon ? "Reconnect" : "Handover"}
+                    </span>
+                  </Box>
 
                   {/* Device */}
                   <Stack direction="row" spacing={0.75} alignItems="center">
@@ -353,6 +410,11 @@ export function HandoverHistoryPage() {
                     <span style={{ color: "#64748b" }}>#{ev.from_cell}</span>
                     <span style={{ color: "#334155", margin: "0 5px" }}>→</span>
                     <span style={{ color: "#e2e8f0" }}>#{ev.to_cell}</span>
+                  </Typography>
+
+                  {/* Time gap since last sample */}
+                  <Typography sx={{ fontSize: 10, color: recon ? "#94a3b8" : "#475569", fontFamily: "monospace" }}>
+                    {ev.gap_s != null ? fmtGap(ev.gap_s) : "—"}
                   </Typography>
 
                   {/* RSRP before */}
@@ -372,15 +434,21 @@ export function HandoverHistoryPage() {
 
                   {/* Reason */}
                   <Typography sx={{ fontSize: 10, fontWeight: 700, color: reasonColor }}>
-                    {ev.reason === "mobility" ? "Moving" : "Congest."}
-                    {ev.reason === "mobility" && ev.velocity > 0 && (
+                    {recon ? "Re-attach" : ev.reason === "mobility" ? "Moving" : "Congest."}
+                    {!recon && ev.reason === "mobility" && ev.velocity > 0 && (
                       <span style={{ color: "#475569", fontWeight: 400, display: "block", fontSize: 9 }}>{Math.round(ev.velocity)} km/h</span>
                     )}
                   </Typography>
 
                   {/* AI Intel */}
                   <Box>
-                    <AIBadge ai={ev.ai_prediction ?? null} />
+                    {recon ? (
+                      <Tooltip title="No AI prediction — reconnections happen after a long idle gap, outside any continuous prediction session" arrow>
+                        <span style={{ fontSize: 10, color: "#475569", cursor: "help" }}>n/a</span>
+                      </Tooltip>
+                    ) : (
+                      <AIBadge ai={ev.ai_prediction ?? null} />
+                    )}
                   </Box>
                 </Box>
               );
@@ -390,7 +458,7 @@ export function HandoverHistoryPage() {
       </Card>
 
       {/* AI legend */}
-      {events.some((e) => e.ai_prediction != null) && (
+      {allEvents.some((e) => e.ai_prediction != null) && (
         <Stack direction="row" spacing={2} sx={{ px: 1, pb: 0.5 }}>
           <Typography sx={{ fontSize: 10, color: "#334155" }}>AI Intel legend:</Typography>
           {[
