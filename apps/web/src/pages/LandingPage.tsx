@@ -226,7 +226,7 @@ export function LandingPage() {
             {[
               { l: "Email", v: "cellpilot@gmail.com", icon: "✉️" },
               { l: "Project", v: "5G AI Handover Platform — Research", icon: "🎓" },
-              { l: "GitHub", v: "github.com/bellaaghaaziz/5G_Dashboard", icon: "💻" },
+              { l: "GitHub", v: "github.com/bellaaghaaziz/Esprit-PIDATA-4DATA-2025-2026-Nexo", icon: "💻" },
             ].map(c => (
               <div key={c.l} style={{
                 display: "flex", alignItems: "center", gap: 16, padding: "18px 24px",

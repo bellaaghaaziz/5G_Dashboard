@@ -1,8 +1,10 @@
 import AdminPanelSettingsRoundedIcon from "@mui/icons-material/AdminPanelSettingsRounded";
 import CellTowerRoundedIcon from "@mui/icons-material/CellTowerRounded";
+import EngineeringRoundedIcon from "@mui/icons-material/EngineeringRounded";
 import ScienceRoundedIcon from "@mui/icons-material/ScienceRounded";
-import { Box, Card, CardActionArea, CardContent, Grid, Stack, Typography } from "@mui/material";
+import { Box, Card, CardActionArea, CardContent, Grid, Typography } from "@mui/material";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/auth";
 
 const GLASS = {
   background: "rgba(15, 23, 42, 0.65)",
@@ -11,7 +13,7 @@ const GLASS = {
   borderRadius: 3,
 };
 
-const sections = [
+const ALL_SECTIONS = [
   {
     title: "Live Map",
     desc: "Watch devices move across the city in real time and see the AI keeping connections strong automatically.",
@@ -19,6 +21,7 @@ const sections = [
     gradient: "linear-gradient(135deg, #22d3ee, #3b82f6)",
     shadow: "rgba(34,211,238,0.3)",
     path: "/app/operator",
+    roles: ["network_operator", "admin"],
   },
   {
     title: "AI Results",
@@ -27,6 +30,16 @@ const sections = [
     gradient: "linear-gradient(135deg, #a855f7, #6366f1)",
     shadow: "rgba(168,85,247,0.3)",
     path: "/app/scientist",
+    roles: ["data_scientist", "admin"],
+  },
+  {
+    title: "ML Engineer",
+    desc: "Run the AI training pipeline, monitor model performance, track experiments and manage deployments.",
+    icon: <EngineeringRoundedIcon sx={{ fontSize: 36 }} />,
+    gradient: "linear-gradient(135deg, #fbbf24, #f59e0b)",
+    shadow: "rgba(251,191,36,0.3)",
+    path: "/app/mlops",
+    roles: ["ml_engineer", "admin"],
   },
   {
     title: "Admin",
@@ -35,11 +48,15 @@ const sections = [
     gradient: "linear-gradient(135deg, #f59e0b, #ef4444)",
     shadow: "rgba(245,158,11,0.3)",
     path: "/app/admin",
+    roles: ["admin"],
   },
 ];
 
 export function HomePage() {
   const navigate = useNavigate();
+  const { role } = useAuth();
+
+  const sections = ALL_SECTIONS.filter(s => role && s.roles.includes(role));
 
   return (
     <Box>
@@ -56,7 +73,7 @@ export function HomePage() {
             mb: 1,
           }}
         >
-          5G Handover AI
+          Nexo
         </Typography>
         <Typography variant="h6" sx={{ color: "text.secondary", fontWeight: 400, maxWidth: 600 }}>
           Welcome back! Where would you like to go?
@@ -66,7 +83,7 @@ export function HomePage() {
       {/* Module Cards */}
       <Grid container spacing={3}>
         {sections.map((s) => (
-          <Grid size={{ xs: 12, md: 4 }} key={s.title}>
+          <Grid size={{ xs: 12, md: sections.length === 1 ? 12 : sections.length === 2 ? 6 : 4 }} key={s.title}>
             <Card
               sx={{
                 ...GLASS,
