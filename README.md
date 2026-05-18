@@ -141,6 +141,7 @@ uvicorn mlops.api:app --host 0.0.0.0 --port 8000
 | Name | Role |
 |---|---|
 | Aziz Bella | ML Pipeline, Backend Architecture, System Design |
+| Zakaria Zarrouk | Frontend & ML Pipeline Engineering |
 | The Best Team Group | Research & Development |
 
 ---
